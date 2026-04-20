@@ -1,0 +1,341 @@
+use std::sync::Arc;
+use std::time::Instant;
+
+use winit::application::ApplicationHandler;
+use winit::event::WindowEvent;
+use winit::event_loop::ActiveEventLoop;
+use winit::window::{Window, WindowId};
+
+use crate::renderer::{Uniforms, WaveRenderer};
+use crate::state::SimState;
+use crate::ui;
+
+pub struct App {
+    state: Option<RuntimeState>,
+    sim: SimState,
+    last_frame: Instant,
+}
+
+impl App {
+    pub fn new() -> Self {
+        Self {
+            state: None,
+            sim: SimState::default(),
+            last_frame: Instant::now(),
+        }
+    }
+}
+
+struct RuntimeState {
+    window: Arc<Window>,
+    surface: wgpu::Surface<'static>,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    config: wgpu::SurfaceConfiguration,
+    renderer: WaveRenderer,
+    egui_ctx: egui::Context,
+    egui_state: egui_winit::State,
+    egui_renderer: egui_wgpu::Renderer,
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.state.is_some() {
+            return;
+        }
+
+        let attrs = Window::default_attributes()
+            .with_title("Interferentia — wave concurrence")
+            .with_inner_size(winit::dpi::PhysicalSize::new(
+                (ui::PANEL_WIDTH as u32) + self.sim.requested_canvas_px,
+                self.sim.requested_canvas_px,
+            ));
+        let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
+
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
+            ..Default::default()
+        });
+
+        let surface = instance
+            .create_surface(window.clone())
+            .expect("create surface");
+
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        }))
+        .expect("no compatible GPU adapter");
+
+        let (device, queue) = pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::default(),
+            },
+            None,
+        ))
+        .expect("request device");
+
+        let size = window.inner_size();
+        let caps = surface.get_capabilities(&adapter);
+        // Prefer a non-sRGB format so egui's sRGB-aware shader doesn't double-correct.
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| !f.is_srgb())
+            .unwrap_or(caps.formats[0]);
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &config);
+
+        let renderer = WaveRenderer::new(&device, format);
+
+        let egui_ctx = egui::Context::default();
+        ui::install_style(&egui_ctx);
+        let egui_state = egui_winit::State::new(
+            egui_ctx.clone(),
+            egui::ViewportId::ROOT,
+            window.as_ref(),
+            Some(window.scale_factor() as f32),
+            None,
+            None,
+        );
+        let egui_renderer = egui_wgpu::Renderer::new(&device, format, None, 1, false);
+
+        // Push initial emitter buffer.
+        let emitters = self.sim.build_emitters();
+        renderer.update_emitters(&queue, &emitters);
+        self.sim.dirty = false;
+
+        self.state = Some(RuntimeState {
+            window,
+            surface,
+            device,
+            queue,
+            config,
+            renderer,
+            egui_ctx,
+            egui_state,
+            egui_renderer,
+        });
+        self.last_frame = Instant::now();
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _id: WindowId,
+        event: WindowEvent,
+    ) {
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+
+        let response = state
+            .egui_state
+            .on_window_event(state.window.as_ref(), &event);
+        if response.repaint {
+            state.window.request_redraw();
+        }
+        if response.consumed {
+            return;
+        }
+
+        match event {
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::Resized(size) => {
+                if size.width > 0 && size.height > 0 {
+                    state.config.width = size.width;
+                    state.config.height = size.height;
+                    state.surface.configure(&state.device, &state.config);
+                    state.window.request_redraw();
+                }
+            }
+            WindowEvent::RedrawRequested => {
+                self.render();
+            }
+            _ => {}
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(state) = self.state.as_ref() {
+            state.window.request_redraw();
+        }
+    }
+}
+
+impl App {
+    fn render(&mut self) {
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+
+        // Tick clock.
+        let now = Instant::now();
+        let dt = (now - self.last_frame).as_secs_f32().min(0.1);
+        self.last_frame = now;
+        if !self.sim.paused {
+            self.sim.time += dt;
+        }
+
+        // Compute canvas rectangle = window area minus left UI panel.
+        let pixels_per_point = state.window.scale_factor() as f32;
+        let panel_px = ui::PANEL_WIDTH * pixels_per_point;
+
+        // Apply user-requested canvas resolution by resizing the window.
+        let want_w = (panel_px as u32).saturating_add(self.sim.requested_canvas_px);
+        let want_h = self.sim.requested_canvas_px;
+        if state.config.width != want_w || state.config.height != want_h {
+            let _ = state
+                .window
+                .request_inner_size(winit::dpi::PhysicalSize::new(want_w, want_h));
+        }
+
+        let canvas_w = (state.config.width as f32 - panel_px).max(1.0);
+        let canvas_h = state.config.height as f32;
+        let canvas_size_px = canvas_w.min(canvas_h);
+        // Center canvas in the available area.
+        let canvas_origin = [
+            panel_px + (canvas_w - canvas_size_px) * 0.5,
+            (canvas_h - canvas_size_px) * 0.5,
+        ];
+
+        // If canvas size changed materially, update sim canvas + regen emitters.
+        if (self.sim.canvas_size - canvas_size_px).abs() > 0.5 {
+            self.sim.canvas_size = canvas_size_px;
+            self.sim.dirty = true;
+        }
+
+        if self.sim.dirty {
+            let emitters = self.sim.build_emitters();
+            state.renderer.update_emitters(&state.queue, &emitters);
+            self.sim.dirty = false;
+        }
+
+        let uniforms = Uniforms {
+            resolution: [state.config.width as f32, state.config.height as f32],
+            canvas_origin,
+            canvas_size: [canvas_size_px, canvas_size_px],
+            time: self.sim.time,
+            num_emitters: self.sim.num_nodes as u32,
+            wave_speed: self.sim.wave_speed,
+            amp_scale: self.sim.amp_scale,
+            color_mode: self.sim.color_mode_u32(),
+            decay_mode: self.sim.decay_mode_u32(),
+        };
+        state.renderer.update_uniforms(&state.queue, &uniforms);
+
+        // Run egui.
+        let raw_input = state.egui_state.take_egui_input(state.window.as_ref());
+        let full_output = state.egui_ctx.run(raw_input, |ctx| {
+            ui::draw(ctx, &mut self.sim);
+        });
+        state
+            .egui_state
+            .handle_platform_output(state.window.as_ref(), full_output.platform_output);
+        let tris = state
+            .egui_ctx
+            .tessellate(full_output.shapes, full_output.pixels_per_point);
+        for (id, image_delta) in &full_output.textures_delta.set {
+            state
+                .egui_renderer
+                .update_texture(&state.device, &state.queue, *id, image_delta);
+        }
+
+        // Acquire frame.
+        let frame = match state.surface.get_current_texture() {
+            Ok(f) => f,
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                state.surface.configure(&state.device, &state.config);
+                return;
+            }
+            Err(e) => {
+                log::error!("surface error: {e:?}");
+                return;
+            }
+        };
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = state
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("frame-encoder"),
+            });
+
+        let screen_descriptor = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [state.config.width, state.config.height],
+            pixels_per_point,
+        };
+        state.egui_renderer.update_buffers(
+            &state.device,
+            &state.queue,
+            &mut encoder,
+            &tris,
+            &screen_descriptor,
+        );
+
+        // Wave pass.
+        {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("wave-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            state.renderer.draw(&mut rpass);
+        }
+
+        // egui pass.
+        {
+            let mut rpass = encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("egui-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                })
+                .forget_lifetime();
+            state
+                .egui_renderer
+                .render(&mut rpass, &tris, &screen_descriptor);
+        }
+
+        for id in &full_output.textures_delta.free {
+            state.egui_renderer.free_texture(id);
+        }
+
+        state.queue.submit(std::iter::once(encoder.finish()));
+        frame.present();
+    }
+}
