@@ -5,7 +5,7 @@ use crate::renderer::MAX_SPEC;
 use crate::shape::WaveShape;
 use crate::spectrum::SpectrumKind;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ColorMode {
     Real,
     Intensity,
@@ -13,13 +13,15 @@ pub enum ColorMode {
     Spectral,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DecayMode {
     None,
     InvSqrtR,
     InvR,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct SimState {
     /// Internal simulation render resolution (N×N). Higher = sharper.
     pub sim_resolution: u32,
@@ -45,9 +47,18 @@ pub struct SimState {
     pub paused: bool,
     pub time: f32,
     /// Marks emitter buffer needs rebuild (lattice / freq / count changed).
+    #[serde(skip, default = "default_true")]
     pub emitters_dirty: bool,
     /// Marks spectrum buffer needs rebuild.
+    #[serde(skip, default = "default_true")]
     pub spectrum_dirty: bool,
+    #[serde(skip)]
+    pub preset_io: Option<PresetIo>,
+}
+
+pub enum PresetIo {
+    Save(std::sync::mpsc::Receiver<Option<std::path::PathBuf>>),
+    Load(std::sync::mpsc::Receiver<Option<std::path::PathBuf>>),
 }
 
 impl Default for SimState {
@@ -77,6 +88,7 @@ impl Default for SimState {
             time: 0.0,
             emitters_dirty: true,
             spectrum_dirty: true,
+            preset_io: None,
         }
     }
 }
@@ -124,6 +136,22 @@ impl SimState {
             DecayMode::InvSqrtR => 1,
             DecayMode::InvR => 2,
         }
+    }
+}
+
+fn default_true() -> bool { true }
+
+impl SimState {
+    pub fn save_to_path(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, json)
+    }
+
+    pub fn load_from_path(path: &std::path::Path) -> std::io::Result<Self> {
+        let data = std::fs::read_to_string(path)?;
+        serde_json::from_str(&data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 }
 

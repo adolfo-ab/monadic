@@ -9,7 +9,7 @@ use crate::phase::PhaseMode;
 use crate::renderer::MAX_SPEC;
 use crate::shape::WaveShape;
 use crate::spectrum::SpectrumKind;
-use crate::state::{ColorMode, DecayMode, SimState};
+use crate::state::{ColorMode, DecayMode, PresetIo, SimState};
 
 pub const PANEL_WIDTH: f32 = 320.0;
 
@@ -126,6 +126,34 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                             sim.time = 0.0;
                         }
                     });
+                    ui.add_space(4.0);
+                    let busy = sim.preset_io.is_some();
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(!busy, egui::Button::new("💾  save preset")).clicked() {
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            std::thread::spawn(move || {
+                                let path = rfd::FileDialog::new()
+                                    .set_title("Save preset")
+                                    .set_file_name("preset.json")
+                                    .add_filter("JSON", &["json"])
+                                    .save_file();
+                                let _ = tx.send(path);
+                            });
+                            sim.preset_io = Some(PresetIo::Save(rx));
+                        }
+                        if ui.add_enabled(!busy, egui::Button::new("📂  load preset")).clicked() {
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            std::thread::spawn(move || {
+                                let path = rfd::FileDialog::new()
+                                    .set_title("Load preset")
+                                    .add_filter("JSON", &["json"])
+                                    .pick_file();
+                                let _ = tx.send(path);
+                            });
+                            sim.preset_io = Some(PresetIo::Load(rx));
+                        }
+                    });
+                    poll_preset_io(sim);
                     ui.add_space(8.0);
                     ui.label(
                         RichText::new(format!("t = {:>7.3}  s", sim.time))
@@ -337,6 +365,38 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
             });
                 });
         });
+}
+
+fn poll_preset_io(sim: &mut SimState) {
+    use std::sync::mpsc::TryRecvError;
+    let Some(io) = sim.preset_io.as_ref() else { return };
+    let (rx, is_save) = match io {
+        PresetIo::Save(rx) => (rx, true),
+        PresetIo::Load(rx) => (rx, false),
+    };
+    match rx.try_recv() {
+        Ok(path_opt) => {
+            if let Some(path) = path_opt {
+                if is_save {
+                    if let Err(e) = sim.save_to_path(&path) {
+                        log::error!("save preset failed: {e}");
+                    }
+                } else {
+                    match SimState::load_from_path(&path) {
+                        Ok(loaded) => {
+                            *sim = loaded;
+                            sim.emitters_dirty = true;
+                            sim.spectrum_dirty = true;
+                        }
+                        Err(e) => log::error!("load preset failed: {e}"),
+                    }
+                }
+            }
+            sim.preset_io = None;
+        }
+        Err(TryRecvError::Disconnected) => sim.preset_io = None,
+        Err(TryRecvError::Empty) => {}
+    }
 }
 
 fn color_mode_label(m: ColorMode) -> &'static str {
