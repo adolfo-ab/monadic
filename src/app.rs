@@ -45,7 +45,7 @@ impl ApplicationHandler for App {
         }
 
         let attrs = Window::default_attributes()
-            .with_title("Interferentia — wave concurrence")
+            .with_title("monadic")
             .with_inner_size(winit::dpi::PhysicalSize::new(
                 (ui::PANEL_WIDTH as u32) + self.sim.requested_canvas_px,
                 self.sim.requested_canvas_px,
@@ -103,6 +103,7 @@ impl ApplicationHandler for App {
         let renderer = WaveRenderer::new(&device, format);
 
         let egui_ctx = egui::Context::default();
+        ui::install_fonts(&egui_ctx);
         ui::install_style(&egui_ctx);
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),

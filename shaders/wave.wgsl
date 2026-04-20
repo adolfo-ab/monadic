@@ -60,8 +60,34 @@ fn node_phase(pos: vec2<f32>, base_k: f32, phase_seed: f32, idx: u32) -> f32 {
         return base_k * (dx * nx + dy * ny);
     }
     if (m == 5u) { return u.phase_param_a * u.time; }
-    // antiphase
-    if ((idx & 1u) == 1u) { return PI; }
+    if (m == 6u) {
+        if ((idx & 1u) == 1u) { return PI; }
+        return 0.0;
+    }
+    if (m == 7u) {
+        // Spiral: vortex + focus
+        return u.phase_param_a * theta - base_k * r;
+    }
+    if (m == 8u) {
+        // Hyperbolic saddle, normalized by (canvas/2)^2
+        let half = u.canvas_size.x * 0.5;
+        let denom = max(half * half, 1.0);
+        return u.phase_param_a * (dx * dx - dy * dy) / denom;
+    }
+    if (m == 9u) {
+        // Radial bands: π·floor(β·r/half)
+        let half = max(u.canvas_size.x * 0.5, 1.0);
+        return PI * floor(u.phase_param_a * r / half);
+    }
+    if (m == 10u) {
+        // Checker: π·((floor(β·x/half)+floor(β·y/half)) mod 2)
+        let half = max(u.canvas_size.x * 0.5, 1.0);
+        let ix = floor(u.phase_param_a * dx / half);
+        let iy = floor(u.phase_param_a * dy / half);
+        let parity = (i32(ix) + i32(iy)) & 1;
+        if (parity != 0) { return PI; }
+        return 0.0;
+    }
     return 0.0;
 }
 

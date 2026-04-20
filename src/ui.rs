@@ -1,5 +1,6 @@
 use egui::{
-    Color32, FontId, Margin, Painter, Pos2, Rect, Response, RichText, Sense, Stroke, Ui,
+    Color32, FontData, FontDefinitions, FontFamily, FontId, Margin, Painter, Pos2, Rect, Response,
+    RichText, Sense, Stroke, Ui,
 };
 
 use crate::frequency::FrequencyFn;
@@ -16,6 +17,20 @@ const FREQ_PREVIEW_N: usize = 48;
 const FREQ_PREVIEW_BASE_K: f32 = 1.0;
 const FREQ_PREVIEW_ALPHA: f32 = 1.0;
 const FREQ_PREVIEW_BETA: f32 = 6.0;
+
+pub fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert(
+        "NotoSerif".to_owned(),
+        FontData::from_static(include_bytes!("../assets/NotoSerif.ttf")).into(),
+    );
+    fonts
+        .families
+        .entry(FontFamily::Name("serif".into()))
+        .or_default()
+        .insert(0, "NotoSerif".to_owned());
+    ctx.set_fonts(fonts);
+}
 
 pub fn install_style(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
@@ -71,17 +86,9 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.label(
-                        RichText::new("INTERFERENTIA")
-                            .font(FontId::proportional(18.0))
-                            .strong()
+                        RichText::new("monadic")
+                            .font(FontId::new(22.0, FontFamily::Name("serif".into())))
                             .color(Color32::BLACK),
-                    );
-                    ui.add_space(2.0);
-                    ui.label(
-                        RichText::new("a study of wave concurrence")
-                            .italics()
-                            .color(Color32::from_gray(90))
-                            .size(11.0),
                     );
                     divider(ui);
 
@@ -762,6 +769,91 @@ fn draw_phase_thumb(painter: &Painter, rect: Rect, mode: PhaseMode, param_a: f32
                     painter.line_segment([q, p], stroke);
                 }
                 prev = Some(p);
+            }
+        }
+        PhaseMode::Spiral => {
+            let m = (param_a.abs().round() as i32).max(1);
+            let turns = 2.0;
+            let steps = 60;
+            for arm in 0..m {
+                let arm_off = arm as f32 * std::f32::consts::TAU / m as f32;
+                let mut prev: Option<Pos2> = None;
+                for i in 0..=steps {
+                    let t = i as f32 / steps as f32;
+                    let theta = t * turns * std::f32::consts::TAU + arm_off;
+                    let r = radius * t;
+                    let p = Pos2::new(center.x + r * theta.cos(), center.y + r * theta.sin());
+                    if let Some(q) = prev {
+                        painter.line_segment([q, p], stroke);
+                    }
+                    prev = Some(p);
+                }
+            }
+        }
+        PhaseMode::Hyperbolic => {
+            // Two orthogonal hyperbolas x²−y² = ±c.
+            let sign = if param_a >= 0.0 { 1.0 } else { -1.0 };
+            for lvl in 1..=3 {
+                let c = radius * (lvl as f32 / 3.0) * 0.8;
+                let steps = 40;
+                let mut prev_a: Option<Pos2> = None;
+                let mut prev_b: Option<Pos2> = None;
+                for i in 0..=steps {
+                    let t = (i as f32 / steps as f32) * 2.0 - 1.0;
+                    let y = t * radius;
+                    let under = c * c + sign * y * y;
+                    if under <= 0.0 {
+                        prev_a = None;
+                        prev_b = None;
+                        continue;
+                    }
+                    let x = under.sqrt();
+                    let p1 = Pos2::new(center.x + x, center.y + y);
+                    let p2 = Pos2::new(center.x - x, center.y + y);
+                    if let Some(q) = prev_a {
+                        painter.line_segment([q, p1], stroke);
+                    }
+                    if let Some(q) = prev_b {
+                        painter.line_segment([q, p2], stroke);
+                    }
+                    prev_a = Some(p1);
+                    prev_b = Some(p2);
+                }
+            }
+        }
+        PhaseMode::Bands => {
+            let bands = (param_a.max(1.0).round() as i32).min(8);
+            for b in 1..=bands {
+                let r = radius * (b as f32 / bands as f32);
+                let filled = b & 1 == 1;
+                if filled {
+                    painter.circle_stroke(center, r, Stroke::new(1.4, Color32::BLACK));
+                } else {
+                    painter.circle_stroke(center, r, Stroke::new(0.6, Color32::from_gray(160)));
+                }
+            }
+        }
+        PhaseMode::Checker => {
+            let cols = (param_a.max(1.0).round() as i32).min(8).max(2) as usize;
+            let cell = (radius * 2.0) / cols as f32;
+            let origin = Pos2::new(center.x - radius, center.y - radius);
+            for j in 0..cols {
+                for i in 0..cols {
+                    let cx = origin.x + (i as f32 + 0.5) * cell;
+                    let cy = origin.y + (j as f32 + 0.5) * cell;
+                    let dx = cx - center.x;
+                    let dy = cy - center.y;
+                    if dx * dx + dy * dy > radius * radius {
+                        continue;
+                    }
+                    if (i + j) & 1 == 0 {
+                        let r = Rect::from_center_size(
+                            Pos2::new(cx, cy),
+                            egui::vec2(cell * 0.9, cell * 0.9),
+                        );
+                        painter.rect_filled(r, 0.0, Color32::BLACK);
+                    }
+                }
             }
         }
         PhaseMode::Antiphase => {

@@ -12,6 +12,10 @@ pub enum FrequencyFn {
     Sigmoid,
     Sawtooth,
     ExpDecay,
+    Log,
+    Sine,
+    Power,
+    Tanh,
 }
 
 impl FrequencyFn {
@@ -26,6 +30,10 @@ impl FrequencyFn {
         FrequencyFn::Sigmoid,
         FrequencyFn::Sawtooth,
         FrequencyFn::ExpDecay,
+        FrequencyFn::Log,
+        FrequencyFn::Sine,
+        FrequencyFn::Power,
+        FrequencyFn::Tanh,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -40,6 +48,10 @@ impl FrequencyFn {
             Self::Sigmoid => "Sigmoid",
             Self::Sawtooth => "Sawtooth",
             Self::ExpDecay => "Exp. decay",
+            Self::Log => "Log",
+            Self::Sine => "Sine",
+            Self::Power => "Power",
+            Self::Tanh => "Tanh",
         }
     }
 
@@ -55,6 +67,10 @@ impl FrequencyFn {
             Self::Sigmoid => "k₀·(1 + α·σ(β(r−½)))",
             Self::Sawtooth => "k₀·(1 + α·frac(β·r))",
             Self::ExpDecay => "k₀·(1 + α·e^(−β·r))",
+            Self::Log => "k₀·(1 + α·ln(1+β·r))",
+            Self::Sine => "k₀·(1 + α·sin(β·r))",
+            Self::Power => "k₀·(1 + α·r^β)",
+            Self::Tanh => "k₀·(1 + α·tanh(β(r−½)))",
         }
     }
 
@@ -65,7 +81,15 @@ impl FrequencyFn {
     pub fn uses_beta(&self) -> bool {
         matches!(
             self,
-            Self::Cosine | Self::Gaussian | Self::Sigmoid | Self::Sawtooth | Self::ExpDecay
+            Self::Cosine
+                | Self::Gaussian
+                | Self::Sigmoid
+                | Self::Sawtooth
+                | Self::ExpDecay
+                | Self::Log
+                | Self::Sine
+                | Self::Power
+                | Self::Tanh
         )
     }
 
@@ -91,6 +115,10 @@ impl FrequencyFn {
             }
             Self::Sawtooth => base_k * (1.0 + alpha * (beta * r - (beta * r).floor())),
             Self::ExpDecay => base_k * (1.0 + alpha * (-beta * r).exp()),
+            Self::Log => base_k * (1.0 + alpha * (1.0 + beta * r).ln()),
+            Self::Sine => base_k * (1.0 + alpha * (beta * r).sin()),
+            Self::Power => base_k * (1.0 + alpha * r.powf(beta.max(0.001))),
+            Self::Tanh => base_k * (1.0 + alpha * (beta * (r - 0.5)).tanh()),
         };
         k.max(0.0001)
     }
