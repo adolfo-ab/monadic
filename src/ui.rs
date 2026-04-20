@@ -11,7 +11,7 @@ use crate::shape::WaveShape;
 use crate::spectrum::SpectrumKind;
 use crate::state::{ColorMode, DecayMode, SimState};
 
-pub const PANEL_WIDTH: f32 = 290.0;
+pub const PANEL_WIDTH: f32 = 320.0;
 
 const PREVIEW_N: usize = 96;
 const FREQ_PREVIEW_N: usize = 48;
@@ -69,6 +69,7 @@ pub fn install_style(ctx: &egui::Context) {
     style.visuals = visuals;
     style.spacing.item_spacing = egui::vec2(8.0, 6.0);
     style.spacing.slider_width = 160.0;
+    style.spacing.slider_rail_height = 0.0;
     style.spacing.button_padding = egui::vec2(8.0, 4.0);
     ctx.set_style(style);
 }
@@ -78,7 +79,12 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
         .resizable(false)
         .exact_width(PANEL_WIDTH)
         .frame(egui::Frame {
-            inner_margin: Margin::symmetric(18.0, 14.0),
+            inner_margin: Margin {
+                left: 28.0,
+                right: 28.0,
+                top: 14.0,
+                bottom: 14.0,
+            },
             fill: Color32::WHITE,
             stroke: Stroke::new(1.0, Color32::from_gray(220)),
             ..Default::default()
@@ -86,6 +92,7 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
         .show(ctx, |ui| {
             egui::TopBottomPanel::bottom("globals")
                 .resizable(false)
+                .show_separator_line(false)
                 .frame(egui::Frame {
                     inner_margin: Margin::symmetric(0.0, 10.0),
                     fill: Color32::WHITE,
@@ -282,7 +289,7 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
 
                     section(ui, "VIEW", |ui| {
                         egui::ComboBox::from_id_salt("view-combo")
-                            .width(ui.available_width() - 8.0)
+                            .width(ui.available_width() - 28.0)
                             .selected_text(color_mode_label(sim.color_mode))
                             .show_ui(ui, |ui| {
                                 for m in [
@@ -302,7 +309,7 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
 
                     section(ui, "DECAY", |ui| {
                         egui::ComboBox::from_id_salt("decay-combo")
-                            .width(ui.available_width() - 8.0)
+                            .width(ui.available_width() - 28.0)
                             .selected_text(decay_mode_label(sim.decay_mode))
                             .show_ui(ui, |ui| {
                                 for m in [DecayMode::None, DecayMode::InvSqrtR, DecayMode::InvR] {
@@ -1236,26 +1243,47 @@ fn section<R>(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui) -> R) -> R {
 }
 
 fn slider(ui: &mut Ui, s: egui::Slider<'_>) -> Response {
-    let line_idx = ui.painter().add(egui::Shape::Noop);
     let slider_w = ui.style().spacing.slider_width;
-    let r = ui.add(s);
-    let y = r.rect.center().y;
-    let x0 = r.rect.left();
-    let x1 = (x0 + slider_w).min(r.rect.right());
-    let line = egui::Shape::line_segment(
+    let avail_w = ui.available_width();
+    let h = ui.spacing().interact_size.y;
+    let (_id, rect) = ui.allocate_space(egui::vec2(avail_w, h));
+
+    let y = rect.center().y;
+    let x0 = rect.left();
+    let x1 = (x0 + slider_w).min(rect.right());
+    ui.painter().line_segment(
         [Pos2::new(x0, y), Pos2::new(x1, y)],
-        Stroke::new(0.8, Color32::BLACK),
+        Stroke::new(1.0, Color32::BLACK),
     );
-    ui.painter().set(line_idx, line);
+
+    let saved = ui.style().visuals.clone();
+    {
+        let v = &mut ui.style_mut().visuals;
+        v.extreme_bg_color = Color32::TRANSPARENT;
+        v.widgets.inactive.bg_fill = Color32::WHITE;
+        v.widgets.inactive.weak_bg_fill = Color32::WHITE;
+        v.widgets.inactive.bg_stroke = Stroke::NONE;
+        v.widgets.inactive.fg_stroke = Stroke::new(1.0, Color32::BLACK);
+        v.widgets.hovered.bg_fill = Color32::WHITE;
+        v.widgets.hovered.weak_bg_fill = Color32::WHITE;
+        v.widgets.hovered.fg_stroke = Stroke::new(1.5, Color32::BLACK);
+        v.widgets.active.bg_fill = Color32::from_gray(230);
+        v.widgets.active.weak_bg_fill = Color32::from_gray(230);
+        v.widgets.active.fg_stroke = Stroke::new(1.5, Color32::BLACK);
+        v.widgets.noninteractive.bg_stroke = Stroke::NONE;
+    }
+    let r = ui.put(rect, s);
+    ui.style_mut().visuals = saved;
+
     ui.add_space(4.0);
     r
 }
 
 fn divider(ui: &mut Ui) {
-    ui.add_space(8.0);
+    ui.add_space(14.0);
     let rect = ui.available_rect_before_wrap();
     let y = ui.cursor().top();
     ui.painter()
         .hline(rect.x_range(), y, Stroke::new(1.0, Color32::from_gray(195)));
-    ui.add_space(10.0);
+    ui.add_space(14.0);
 }
