@@ -6,7 +6,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
-use crate::renderer::{Uniforms, WaveRenderer};
+use crate::renderer::{BlitUniforms, Uniforms, WaveRenderer};
 use crate::state::SimState;
 use crate::ui;
 
@@ -47,8 +47,8 @@ impl ApplicationHandler for App {
         let attrs = Window::default_attributes()
             .with_title("monadic")
             .with_inner_size(winit::dpi::PhysicalSize::new(
-                (ui::PANEL_WIDTH as u32) + self.sim.requested_canvas_px,
-                self.sim.requested_canvas_px,
+                (ui::PANEL_WIDTH as u32) + 1024,
+                1024u32,
             ));
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
 
@@ -100,7 +100,7 @@ impl ApplicationHandler for App {
         };
         surface.configure(&device, &config);
 
-        let renderer = WaveRenderer::new(&device, format);
+        let renderer = WaveRenderer::new(&device, format, self.sim.sim_resolution);
 
         let egui_ctx = egui::Context::default();
         ui::install_fonts(&egui_ctx);
@@ -199,15 +199,6 @@ impl App {
         let pixels_per_point = state.window.scale_factor() as f32;
         let panel_px = ui::PANEL_WIDTH * pixels_per_point;
 
-        // Apply user-requested canvas resolution by resizing the window.
-        let want_w = (panel_px as u32).saturating_add(self.sim.requested_canvas_px);
-        let want_h = self.sim.requested_canvas_px;
-        if state.config.width != want_w || state.config.height != want_h {
-            let _ = state
-                .window
-                .request_inner_size(winit::dpi::PhysicalSize::new(want_w, want_h));
-        }
-
         let canvas_w = (state.config.width as f32 - panel_px).max(1.0);
         let canvas_h = state.config.height as f32;
         let canvas_size_px = canvas_w.min(canvas_h);
@@ -217,11 +208,10 @@ impl App {
             (canvas_h - canvas_size_px) * 0.5,
         ];
 
-        // If canvas size changed materially, update sim canvas + regen emitters.
-        if (self.sim.canvas_size - canvas_size_px).abs() > 0.5 {
-            self.sim.canvas_size = canvas_size_px;
-            self.sim.emitters_dirty = true;
-        }
+        // Resize offscreen sim texture if requested resolution changed.
+        state
+            .renderer
+            .ensure_sim_size(&state.device, self.sim.sim_resolution);
 
         if self.sim.emitters_dirty {
             let emitters = self.sim.build_emitters();
@@ -235,10 +225,11 @@ impl App {
             self.sim.spectrum_dirty = false;
         }
 
+        let sim_px = self.sim.sim_resolution as f32;
         let uniforms = Uniforms {
-            resolution: [state.config.width as f32, state.config.height as f32],
-            canvas_origin,
-            canvas_size: [canvas_size_px, canvas_size_px],
+            resolution: [sim_px, sim_px],
+            canvas_origin: [0.0, 0.0],
+            canvas_size: [sim_px, sim_px],
             time: self.sim.time,
             num_emitters: self.sim.num_nodes as u32,
             wave_speed: self.sim.wave_speed,
@@ -251,6 +242,16 @@ impl App {
             phase_param_b: self.sim.phase_param_b,
         };
         state.renderer.update_uniforms(&state.queue, &uniforms);
+
+        let blit_uniforms = BlitUniforms {
+            dst_origin: canvas_origin,
+            dst_size: [canvas_size_px, canvas_size_px],
+            screen_size: [state.config.width as f32, state.config.height as f32],
+            _pad: [0.0, 0.0],
+        };
+        state
+            .renderer
+            .update_blit_uniforms(&state.queue, &blit_uniforms);
 
         // Run egui.
         let raw_input = state.egui_state.take_egui_input(state.window.as_ref());
@@ -303,10 +304,13 @@ impl App {
             &screen_descriptor,
         );
 
-        // Wave pass.
+        // Offscreen sim pass.
+        state.renderer.render_sim(&mut encoder);
+
+        // Blit sim texture into canvas rect on the surface.
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("wave-pass"),
+                label: Some("blit-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -319,7 +323,7 @@ impl App {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            state.renderer.draw(&mut rpass);
+            state.renderer.draw_blit(&mut rpass);
         }
 
         // egui pass.

@@ -20,8 +20,8 @@ pub enum DecayMode {
 }
 
 pub struct SimState {
-    pub canvas_size: f32,
-    pub requested_canvas_px: u32,
+    /// Internal simulation render resolution (N×N). Higher = sharper.
+    pub sim_resolution: u32,
     pub lattice_kind: LatticeKind,
     pub num_nodes: usize,
     pub freq_fn: FrequencyFn,
@@ -49,8 +49,7 @@ pub struct SimState {
 impl Default for SimState {
     fn default() -> Self {
         Self {
-            canvas_size: 1024.0,
-            requested_canvas_px: 1024,
+            sim_resolution: 1024,
             lattice_kind: LatticeKind::Sunflower,
             num_nodes: 64,
             freq_fn: FrequencyFn::Constant,
@@ -78,9 +77,10 @@ impl Default for SimState {
 impl SimState {
     /// Per-emitter `[x, y, base_k, phase_seed]`.
     pub fn build_emitters(&self) -> Vec<[f32; 4]> {
-        let positions = lattice::generate(self.lattice_kind, self.num_nodes, self.canvas_size);
-        let center = self.canvas_size * 0.5;
-        let max_r = self.canvas_size * 0.5;
+        let size = self.sim_resolution as f32;
+        let positions = lattice::generate(self.lattice_kind, self.num_nodes, size);
+        let center = size * 0.5;
+        let max_r = size * 0.5;
         positions
             .into_iter()
             .enumerate()

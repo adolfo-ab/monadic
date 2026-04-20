@@ -92,12 +92,13 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                     );
                     divider(ui);
 
-                    section(ui, "CANVAS", |ui| {
+                    section(ui, "RESOLUTION", |ui| {
                         if ui
                             .add(
-                                egui::Slider::new(&mut sim.requested_canvas_px, 256..=4096)
-                                    .step_by(64.0)
-                                    .text("N px"),
+                                egui::Slider::new(&mut sim.sim_resolution, 64..=4096)
+                                    .step_by(32.0)
+                                    .logarithmic(true)
+                                    .text("N"),
                             )
                             .changed()
                         {
@@ -244,8 +245,8 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                     );
                     ui.label(
                         RichText::new(format!(
-                            "N = {:>4}    M = {:>2}    canvas = {} px",
-                            sim.num_nodes, sim.spec_count, sim.requested_canvas_px
+                            "N = {:>4}    M = {:>2}    res = {}",
+                            sim.num_nodes, sim.spec_count, sim.sim_resolution
                         ))
                         .monospace()
                         .color(Color32::from_gray(80)),
