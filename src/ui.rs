@@ -84,6 +84,56 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
             ..Default::default()
         })
         .show(ctx, |ui| {
+            egui::TopBottomPanel::bottom("globals")
+                .resizable(false)
+                .frame(egui::Frame {
+                    inner_margin: Margin::symmetric(0.0, 10.0),
+                    fill: Color32::WHITE,
+                    ..Default::default()
+                })
+                .show_inside(ui, |ui| {
+                    section(ui, "RESOLUTION", |ui| {
+                        if slider(
+                            ui,
+                            egui::Slider::new(&mut sim.sim_resolution, 64..=4096)
+                                .step_by(32.0)
+                                .logarithmic(true)
+                                .text("N"),
+                        )
+                        .changed()
+                        {
+                            sim.emitters_dirty = true;
+                        }
+                    });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        let label = if sim.paused { "▶  resume" } else { "❚❚  pause" };
+                        if ui.button(label).clicked() {
+                            sim.paused = !sim.paused;
+                        }
+                        if ui.button("↻  reset t").clicked() {
+                            sim.time = 0.0;
+                        }
+                    });
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new(format!("t = {:>7.3}  s", sim.time))
+                            .monospace()
+                            .color(Color32::from_gray(80)),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "N = {:>4}    M = {:>2}    res = {}",
+                            sim.num_nodes, sim.spec_count, sim.sim_resolution
+                        ))
+                        .monospace()
+                        .color(Color32::from_gray(80)),
+                    );
+                });
+
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none().fill(Color32::WHITE))
+                .show_inside(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.label(
@@ -91,28 +141,30 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                             .font(FontId::new(22.0, FontFamily::Name("serif".into())))
                             .color(Color32::BLACK),
                     );
-                    divider(ui);
 
                     section(ui, "LATTICE", |ui| {
                         lattice_picker(ui, sim);
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut sim.num_nodes, 1..=1024)
-                                    .integer()
-                                    .text("nodes"),
-                            )
-                            .changed()
+                        ui.add_space(6.0);
+                        if slider(
+                            ui,
+                            egui::Slider::new(&mut sim.num_nodes, 1..=1024)
+                                .integer()
+                                .text("nodes"),
+                        )
+                        .changed()
                         {
                             sim.emitters_dirty = true;
                         }
                     });
 
                     section(ui, "PROPAGATION", |ui| {
-                        ui.add(
+                        slider(
+                            ui,
                             egui::Slider::new(&mut sim.wave_speed, 5.0..=400.0)
                                 .text("c (px/s)"),
                         );
-                        ui.add(
+                        slider(
+                            ui,
                             egui::Slider::new(&mut sim.amp_scale, 0.005..=2.0)
                                 .text("amp")
                                 .logarithmic(true),
@@ -122,27 +174,31 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                     section(ui, "FREQUENCY  k(r)", |ui| {
                         frequency_picker(ui, sim);
                         config_popup_button(ui, "freq-config", |ui| {
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut sim.base_k, 0.005..=2.0)
-                                        .text("k₀")
-                                        .logarithmic(true),
+                            if slider(
+                                ui,
+                                egui::Slider::new(&mut sim.base_k, 0.005..=2.0)
+                                    .text("k₀")
+                                    .logarithmic(true),
+                            )
+                            .changed()
+                            {
+                                sim.emitters_dirty = true;
+                            }
+                            if sim.freq_fn.uses_alpha()
+                                && slider(
+                                    ui,
+                                    egui::Slider::new(&mut sim.alpha, -2.0..=4.0).text("α"),
                                 )
                                 .changed()
                             {
                                 sim.emitters_dirty = true;
                             }
-                            if sim.freq_fn.uses_alpha()
-                                && ui
-                                    .add(egui::Slider::new(&mut sim.alpha, -2.0..=4.0).text("α"))
-                                    .changed()
-                            {
-                                sim.emitters_dirty = true;
-                            }
                             if sim.freq_fn.uses_beta()
-                                && ui
-                                    .add(egui::Slider::new(&mut sim.beta, 0.1..=20.0).text("β"))
-                                    .changed()
+                                && slider(
+                                    ui,
+                                    egui::Slider::new(&mut sim.beta, 0.1..=20.0).text("β"),
+                                )
+                                .changed()
                             {
                                 sim.emitters_dirty = true;
                             }
@@ -156,27 +212,27 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                         if has_params {
                             config_popup_button(ui, "spec-config", |ui| {
                                 if sim.spectrum_kind.uses_count()
-                                    && ui
-                                        .add(
-                                            egui::Slider::new(
-                                                &mut sim.spec_count,
-                                                1..=MAX_SPEC as usize,
-                                            )
-                                            .integer()
-                                            .text("M"),
+                                    && slider(
+                                        ui,
+                                        egui::Slider::new(
+                                            &mut sim.spec_count,
+                                            1..=MAX_SPEC as usize,
                                         )
-                                        .changed()
+                                        .integer()
+                                        .text("M"),
+                                    )
+                                    .changed()
                                 {
                                     sim.spectrum_dirty = true;
                                 }
                                 if sim.spectrum_kind.uses_spread()
-                                    && ui
-                                        .add(
-                                            egui::Slider::new(&mut sim.spec_spread, 0.005..=1.0)
-                                                .text("Δ")
-                                                .logarithmic(true),
-                                        )
-                                        .changed()
+                                    && slider(
+                                        ui,
+                                        egui::Slider::new(&mut sim.spec_spread, 0.005..=1.0)
+                                            .text("Δ")
+                                            .logarithmic(true),
+                                    )
+                                    .changed()
                                 {
                                     sim.spectrum_dirty = true;
                                 }
@@ -189,7 +245,8 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                         if sim.phase_mode.uses_param_a() {
                             config_popup_button(ui, "phase-config", |ui| {
                                 let (lo, hi) = sim.phase_mode.param_a_range();
-                                ui.add(
+                                slider(
+                                    ui,
                                     egui::Slider::new(&mut sim.phase_param_a, lo..=hi)
                                         .text(sim.phase_mode.param_a_label()),
                                 );
@@ -205,14 +262,16 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                             config_popup_button(ui, "shape-config", |ui| {
                                 if sim.wave_shape.uses_param_a() {
                                     let (lo, hi) = sim.wave_shape.param_a_range();
-                                    ui.add(
+                                    slider(
+                                        ui,
                                         egui::Slider::new(&mut sim.shape_param_a, lo..=hi)
                                             .text(sim.wave_shape.param_a_label()),
                                     );
                                 }
                                 if sim.wave_shape.uses_param_b() {
                                     let (lo, hi) = sim.wave_shape.param_b_range();
-                                    ui.add(
+                                    slider(
+                                        ui,
                                         egui::Slider::new(&mut sim.shape_param_b, lo..=hi)
                                             .text(sim.wave_shape.param_b_label()),
                                     );
@@ -222,7 +281,7 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                     });
 
                     section(ui, "VIEW", |ui| {
-                        egui::ComboBox::from_id_source("view-combo")
+                        egui::ComboBox::from_id_salt("view-combo")
                             .width(ui.available_width() - 8.0)
                             .selected_text(color_mode_label(sim.color_mode))
                             .show_ui(ui, |ui| {
@@ -242,7 +301,7 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                     });
 
                     section(ui, "DECAY", |ui| {
-                        egui::ComboBox::from_id_source("decay-combo")
+                        egui::ComboBox::from_id_salt("decay-combo")
                             .width(ui.available_width() - 8.0)
                             .selected_text(decay_mode_label(sim.decay_mode))
                             .show_ui(ui, |ui| {
@@ -256,48 +315,9 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                             });
                     });
 
-                    divider(ui);
-
-                    section(ui, "RESOLUTION", |ui| {
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut sim.sim_resolution, 64..=4096)
-                                    .step_by(32.0)
-                                    .logarithmic(true)
-                                    .text("N"),
-                            )
-                            .changed()
-                        {
-                            sim.emitters_dirty = true;
-                        }
-                    });
-
-                    ui.horizontal(|ui| {
-                        let label = if sim.paused { "▶  resume" } else { "❚❚  pause" };
-                        if ui.button(label).clicked() {
-                            sim.paused = !sim.paused;
-                        }
-                        if ui.button("↻  reset t").clicked() {
-                            sim.time = 0.0;
-                        }
-                    });
-
-                    ui.add_space(6.0);
-                    ui.label(
-                        RichText::new(format!("t = {:>7.3}  s", sim.time))
-                            .monospace()
-                            .color(Color32::from_gray(80)),
-                    );
-                    ui.label(
-                        RichText::new(format!(
-                            "N = {:>4}    M = {:>2}    res = {}",
-                            sim.num_nodes, sim.spec_count, sim.sim_resolution
-                        ))
-                        .monospace()
-                        .color(Color32::from_gray(80)),
-                    );
                 });
             });
+                });
         });
 }
 
@@ -319,6 +339,7 @@ fn decay_mode_label(m: DecayMode) -> &'static str {
 }
 
 fn config_popup_button(ui: &mut Ui, id_salt: &str, body: impl FnOnce(&mut Ui)) {
+    ui.add_space(8.0);
     let popup_id = ui.make_persistent_id(id_salt);
     let response = ui.button("⚙  config");
     if response.clicked() {
@@ -330,8 +351,17 @@ fn config_popup_button(ui: &mut Ui, id_salt: &str, body: impl FnOnce(&mut Ui)) {
         &response,
         egui::PopupCloseBehavior::CloseOnClickOutside,
         |ui| {
-            ui.set_min_width(250.0);
-            body(ui);
+            ui.set_min_width(260.0);
+            egui::Frame::none()
+                .inner_margin(Margin {
+                    left: 8.0,
+                    right: 18.0,
+                    top: 6.0,
+                    bottom: 6.0,
+                })
+                .show(ui, |ui| {
+                    body(ui);
+                });
         },
     );
 }
@@ -1192,16 +1222,32 @@ fn draw_shape_thumb(painter: &Painter, rect: Rect, shape: WaveShape, a: f32, b: 
 }
 
 fn section<R>(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.add_space(4.0);
+    divider(ui);
     ui.label(
         RichText::new(title)
             .size(10.0)
             .color(Color32::from_gray(110))
             .strong(),
     );
-    ui.add_space(2.0);
+    ui.add_space(6.0);
     let r = body(ui);
-    ui.add_space(2.0);
+    ui.add_space(6.0);
+    r
+}
+
+fn slider(ui: &mut Ui, s: egui::Slider<'_>) -> Response {
+    let line_idx = ui.painter().add(egui::Shape::Noop);
+    let slider_w = ui.style().spacing.slider_width;
+    let r = ui.add(s);
+    let y = r.rect.center().y;
+    let x0 = r.rect.left();
+    let x1 = (x0 + slider_w).min(r.rect.right());
+    let line = egui::Shape::line_segment(
+        [Pos2::new(x0, y), Pos2::new(x1, y)],
+        Stroke::new(0.8, Color32::BLACK),
+    );
+    ui.painter().set(line_idx, line);
+    ui.add_space(4.0);
     r
 }
 
@@ -1210,6 +1256,6 @@ fn divider(ui: &mut Ui) {
     let rect = ui.available_rect_before_wrap();
     let y = ui.cursor().top();
     ui.painter()
-        .hline(rect.x_range(), y, Stroke::new(1.0, Color32::from_gray(210)));
+        .hline(rect.x_range(), y, Stroke::new(1.0, Color32::from_gray(195)));
     ui.add_space(10.0);
 }
