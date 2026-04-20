@@ -93,20 +93,6 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                     );
                     divider(ui);
 
-                    section(ui, "RESOLUTION", |ui| {
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut sim.sim_resolution, 64..=4096)
-                                    .step_by(32.0)
-                                    .logarithmic(true)
-                                    .text("N"),
-                            )
-                            .changed()
-                        {
-                            sim.emitters_dirty = true;
-                        }
-                    });
-
                     section(ui, "LATTICE", |ui| {
                         lattice_picker(ui, sim);
                         if ui
@@ -118,92 +104,6 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                             .changed()
                         {
                             sim.emitters_dirty = true;
-                        }
-                    });
-
-                    section(ui, "FREQUENCY  k(r)", |ui| {
-                        frequency_picker(ui, sim);
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut sim.base_k, 0.005..=2.0)
-                                    .text("k₀")
-                                    .logarithmic(true),
-                            )
-                            .changed()
-                        {
-                            sim.emitters_dirty = true;
-                        }
-                        if sim.freq_fn.uses_alpha()
-                            && ui
-                                .add(egui::Slider::new(&mut sim.alpha, -2.0..=4.0).text("α"))
-                                .changed()
-                        {
-                            sim.emitters_dirty = true;
-                        }
-                        if sim.freq_fn.uses_beta()
-                            && ui
-                                .add(egui::Slider::new(&mut sim.beta, 0.1..=20.0).text("β"))
-                                .changed()
-                        {
-                            sim.emitters_dirty = true;
-                        }
-                    });
-
-                    section(ui, "SPECTRUM  per-node M", |ui| {
-                        spectrum_picker(ui, sim);
-                        if sim.spectrum_kind.uses_count()
-                            && ui
-                                .add(
-                                    egui::Slider::new(
-                                        &mut sim.spec_count,
-                                        1..=MAX_SPEC as usize,
-                                    )
-                                    .integer()
-                                    .text("M"),
-                                )
-                                .changed()
-                        {
-                            sim.spectrum_dirty = true;
-                        }
-                        if sim.spectrum_kind.uses_spread()
-                            && ui
-                                .add(
-                                    egui::Slider::new(&mut sim.spec_spread, 0.005..=1.0)
-                                        .text("Δ")
-                                        .logarithmic(true),
-                                )
-                                .changed()
-                        {
-                            sim.spectrum_dirty = true;
-                        }
-                    });
-
-                    section(ui, "PHASE  φ", |ui| {
-                        phase_picker(ui, sim);
-                        if sim.phase_mode.uses_param_a() {
-                            let (lo, hi) = sim.phase_mode.param_a_range();
-                            ui.add(
-                                egui::Slider::new(&mut sim.phase_param_a, lo..=hi)
-                                    .text(sim.phase_mode.param_a_label()),
-                            );
-                        }
-                    });
-
-                    section(ui, "WAVEFRONT", |ui| {
-                        wave_shape_picker(ui, sim);
-                        if sim.wave_shape.uses_param_a() {
-                            let (lo, hi) = sim.wave_shape.param_a_range();
-                            ui.add(
-                                egui::Slider::new(&mut sim.shape_param_a, lo..=hi)
-                                    .text(sim.wave_shape.param_a_label()),
-                            );
-                        }
-                        if sim.wave_shape.uses_param_b() {
-                            let (lo, hi) = sim.wave_shape.param_b_range();
-                            ui.add(
-                                egui::Slider::new(&mut sim.shape_param_b, lo..=hi)
-                                    .text(sim.wave_shape.param_b_label()),
-                            );
                         }
                     });
 
@@ -219,32 +119,158 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                         );
                     });
 
+                    section(ui, "FREQUENCY  k(r)", |ui| {
+                        frequency_picker(ui, sim);
+                        config_popup_button(ui, "freq-config", |ui| {
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut sim.base_k, 0.005..=2.0)
+                                        .text("k₀")
+                                        .logarithmic(true),
+                                )
+                                .changed()
+                            {
+                                sim.emitters_dirty = true;
+                            }
+                            if sim.freq_fn.uses_alpha()
+                                && ui
+                                    .add(egui::Slider::new(&mut sim.alpha, -2.0..=4.0).text("α"))
+                                    .changed()
+                            {
+                                sim.emitters_dirty = true;
+                            }
+                            if sim.freq_fn.uses_beta()
+                                && ui
+                                    .add(egui::Slider::new(&mut sim.beta, 0.1..=20.0).text("β"))
+                                    .changed()
+                            {
+                                sim.emitters_dirty = true;
+                            }
+                        });
+                    });
+
+                    section(ui, "SPECTRUM  per-node M", |ui| {
+                        spectrum_picker(ui, sim);
+                        let has_params = sim.spectrum_kind.uses_count()
+                            || sim.spectrum_kind.uses_spread();
+                        if has_params {
+                            config_popup_button(ui, "spec-config", |ui| {
+                                if sim.spectrum_kind.uses_count()
+                                    && ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut sim.spec_count,
+                                                1..=MAX_SPEC as usize,
+                                            )
+                                            .integer()
+                                            .text("M"),
+                                        )
+                                        .changed()
+                                {
+                                    sim.spectrum_dirty = true;
+                                }
+                                if sim.spectrum_kind.uses_spread()
+                                    && ui
+                                        .add(
+                                            egui::Slider::new(&mut sim.spec_spread, 0.005..=1.0)
+                                                .text("Δ")
+                                                .logarithmic(true),
+                                        )
+                                        .changed()
+                                {
+                                    sim.spectrum_dirty = true;
+                                }
+                            });
+                        }
+                    });
+
+                    section(ui, "PHASE  φ", |ui| {
+                        phase_picker(ui, sim);
+                        if sim.phase_mode.uses_param_a() {
+                            config_popup_button(ui, "phase-config", |ui| {
+                                let (lo, hi) = sim.phase_mode.param_a_range();
+                                ui.add(
+                                    egui::Slider::new(&mut sim.phase_param_a, lo..=hi)
+                                        .text(sim.phase_mode.param_a_label()),
+                                );
+                            });
+                        }
+                    });
+
+                    section(ui, "WAVEFRONT", |ui| {
+                        wave_shape_picker(ui, sim);
+                        let has_params = sim.wave_shape.uses_param_a()
+                            || sim.wave_shape.uses_param_b();
+                        if has_params {
+                            config_popup_button(ui, "shape-config", |ui| {
+                                if sim.wave_shape.uses_param_a() {
+                                    let (lo, hi) = sim.wave_shape.param_a_range();
+                                    ui.add(
+                                        egui::Slider::new(&mut sim.shape_param_a, lo..=hi)
+                                            .text(sim.wave_shape.param_a_label()),
+                                    );
+                                }
+                                if sim.wave_shape.uses_param_b() {
+                                    let (lo, hi) = sim.wave_shape.param_b_range();
+                                    ui.add(
+                                        egui::Slider::new(&mut sim.shape_param_b, lo..=hi)
+                                            .text(sim.wave_shape.param_b_label()),
+                                    );
+                                }
+                            });
+                        }
+                    });
+
                     section(ui, "VIEW", |ui| {
-                        ui.radio_value(&mut sim.color_mode, ColorMode::Real, "ψ real (mono)");
-                        ui.radio_value(
-                            &mut sim.color_mode,
-                            ColorMode::Intensity,
-                            "|ψ|² intensity (mono)",
-                        );
-                        ui.radio_value(
-                            &mut sim.color_mode,
-                            ColorMode::Domain,
-                            "domain (arg → hue)",
-                        );
-                        ui.radio_value(
-                            &mut sim.color_mode,
-                            ColorMode::Spectral,
-                            "spectral (per-freq hue)",
-                        );
+                        egui::ComboBox::from_id_source("view-combo")
+                            .width(ui.available_width() - 8.0)
+                            .selected_text(color_mode_label(sim.color_mode))
+                            .show_ui(ui, |ui| {
+                                for m in [
+                                    ColorMode::Real,
+                                    ColorMode::Intensity,
+                                    ColorMode::Domain,
+                                    ColorMode::Spectral,
+                                ] {
+                                    ui.selectable_value(
+                                        &mut sim.color_mode,
+                                        m,
+                                        color_mode_label(m),
+                                    );
+                                }
+                            });
                     });
 
                     section(ui, "DECAY", |ui| {
-                        ui.radio_value(&mut sim.decay_mode, DecayMode::None, "none");
-                        ui.radio_value(&mut sim.decay_mode, DecayMode::InvSqrtR, "1 / √r");
-                        ui.radio_value(&mut sim.decay_mode, DecayMode::InvR, "1 / r");
+                        egui::ComboBox::from_id_source("decay-combo")
+                            .width(ui.available_width() - 8.0)
+                            .selected_text(decay_mode_label(sim.decay_mode))
+                            .show_ui(ui, |ui| {
+                                for m in [DecayMode::None, DecayMode::InvSqrtR, DecayMode::InvR] {
+                                    ui.selectable_value(
+                                        &mut sim.decay_mode,
+                                        m,
+                                        decay_mode_label(m),
+                                    );
+                                }
+                            });
                     });
 
                     divider(ui);
+
+                    section(ui, "RESOLUTION", |ui| {
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut sim.sim_resolution, 64..=4096)
+                                    .step_by(32.0)
+                                    .logarithmic(true)
+                                    .text("N"),
+                            )
+                            .changed()
+                        {
+                            sim.emitters_dirty = true;
+                        }
+                    });
 
                     ui.horizontal(|ui| {
                         let label = if sim.paused { "▶  resume" } else { "❚❚  pause" };
@@ -273,6 +299,41 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                 });
             });
         });
+}
+
+fn color_mode_label(m: ColorMode) -> &'static str {
+    match m {
+        ColorMode::Real => "ψ real (mono)",
+        ColorMode::Intensity => "|ψ|² intensity (mono)",
+        ColorMode::Domain => "domain (arg → hue)",
+        ColorMode::Spectral => "spectral (per-freq hue)",
+    }
+}
+
+fn decay_mode_label(m: DecayMode) -> &'static str {
+    match m {
+        DecayMode::None => "none",
+        DecayMode::InvSqrtR => "1 / √r",
+        DecayMode::InvR => "1 / r",
+    }
+}
+
+fn config_popup_button(ui: &mut Ui, id_salt: &str, body: impl FnOnce(&mut Ui)) {
+    let popup_id = ui.make_persistent_id(id_salt);
+    let response = ui.button("⚙  config");
+    if response.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(popup_id));
+    }
+    egui::popup::popup_below_widget(
+        ui,
+        popup_id,
+        &response,
+        egui::PopupCloseBehavior::CloseOnClickOutside,
+        |ui| {
+            ui.set_min_width(250.0);
+            body(ui);
+        },
+    );
 }
 
 // ─── pickers ─────────────────────────────────────────────────────────────
