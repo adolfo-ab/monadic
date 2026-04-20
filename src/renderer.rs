@@ -2,6 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 pub const MAX_EMITTERS: u64 = 1024;
+pub const MAX_SPEC: u64 = 16;
 
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
@@ -15,6 +16,10 @@ pub struct Uniforms {
     pub amp_scale: f32,
     pub color_mode: u32,
     pub decay_mode: u32,
+    pub num_spec: u32,
+    pub phase_mode: u32,
+    pub phase_param_a: f32,
+    pub phase_param_b: f32,
 }
 
 pub struct WaveRenderer {
@@ -22,6 +27,7 @@ pub struct WaveRenderer {
     bind_group: wgpu::BindGroup,
     uniform_buffer: wgpu::Buffer,
     emitter_buffer: wgpu::Buffer,
+    spectrum_buffer: wgpu::Buffer,
 }
 
 impl WaveRenderer {
@@ -41,6 +47,15 @@ impl WaveRenderer {
         let emitter_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("wave-emitters"),
             contents: bytemuck::cast_slice(&[[0.0f32; 4]; MAX_EMITTERS as usize]),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Initialise spectrum to a single component (k_mult=1, amp=1).
+        let mut init_spec = [[0.0f32; 4]; MAX_SPEC as usize];
+        init_spec[0] = [1.0, 1.0, 0.0, 0.0];
+        let spectrum_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("wave-spectrum"),
+            contents: bytemuck::cast_slice(&init_spec),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -67,6 +82,16 @@ impl WaveRenderer {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -81,6 +106,10 @@ impl WaveRenderer {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: emitter_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: spectrum_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -126,6 +155,7 @@ impl WaveRenderer {
             bind_group,
             uniform_buffer,
             emitter_buffer,
+            spectrum_buffer,
         }
     }
 
@@ -139,6 +169,14 @@ impl WaveRenderer {
             return;
         }
         queue.write_buffer(&self.emitter_buffer, 0, bytemuck::cast_slice(&emitters[..n]));
+    }
+
+    pub fn update_spectrum(&self, queue: &wgpu::Queue, spec: &[[f32; 4]]) {
+        let n = (spec.len() as u64).min(MAX_SPEC) as usize;
+        if n == 0 {
+            return;
+        }
+        queue.write_buffer(&self.spectrum_buffer, 0, bytemuck::cast_slice(&spec[..n]));
     }
 
     pub fn draw<'rp>(&'rp self, rpass: &mut wgpu::RenderPass<'rp>) {

@@ -114,10 +114,13 @@ impl ApplicationHandler for App {
         );
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, None, 1, false);
 
-        // Push initial emitter buffer.
+        // Push initial emitter + spectrum buffers.
         let emitters = self.sim.build_emitters();
         renderer.update_emitters(&queue, &emitters);
-        self.sim.dirty = false;
+        self.sim.emitters_dirty = false;
+        let spec = self.sim.build_spectrum();
+        renderer.update_spectrum(&queue, &spec);
+        self.sim.spectrum_dirty = false;
 
         self.state = Some(RuntimeState {
             window,
@@ -216,13 +219,19 @@ impl App {
         // If canvas size changed materially, update sim canvas + regen emitters.
         if (self.sim.canvas_size - canvas_size_px).abs() > 0.5 {
             self.sim.canvas_size = canvas_size_px;
-            self.sim.dirty = true;
+            self.sim.emitters_dirty = true;
         }
 
-        if self.sim.dirty {
+        if self.sim.emitters_dirty {
             let emitters = self.sim.build_emitters();
             state.renderer.update_emitters(&state.queue, &emitters);
-            self.sim.dirty = false;
+            self.sim.emitters_dirty = false;
+        }
+        let spec = self.sim.build_spectrum();
+        let spec_count = spec.len() as u32;
+        if self.sim.spectrum_dirty {
+            state.renderer.update_spectrum(&state.queue, &spec);
+            self.sim.spectrum_dirty = false;
         }
 
         let uniforms = Uniforms {
@@ -235,6 +244,10 @@ impl App {
             amp_scale: self.sim.amp_scale,
             color_mode: self.sim.color_mode_u32(),
             decay_mode: self.sim.decay_mode_u32(),
+            num_spec: spec_count,
+            phase_mode: self.sim.phase_mode.id(),
+            phase_param_a: self.sim.phase_param_a,
+            phase_param_b: self.sim.phase_param_b,
         };
         state.renderer.update_uniforms(&state.queue, &uniforms);
 

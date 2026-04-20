@@ -1,7 +1,9 @@
 mod app;
 mod frequency;
 mod lattice;
+mod phase;
 mod renderer;
+mod spectrum;
 mod state;
 mod ui;
 

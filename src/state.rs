@@ -1,5 +1,8 @@
 use crate::frequency::FrequencyFn;
 use crate::lattice::{self, LatticeKind};
+use crate::phase::PhaseMode;
+use crate::renderer::MAX_SPEC;
+use crate::spectrum::SpectrumKind;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum ColorMode {
@@ -16,8 +19,6 @@ pub enum DecayMode {
 
 pub struct SimState {
     pub canvas_size: f32,
-    /// Requested canvas dimension in physical pixels. The window is resized
-    /// so the wave canvas matches this on each axis.
     pub requested_canvas_px: u32,
     pub lattice_kind: LatticeKind,
     pub num_nodes: usize,
@@ -25,13 +26,22 @@ pub struct SimState {
     pub base_k: f32,
     pub alpha: f32,
     pub beta: f32,
+    pub spectrum_kind: SpectrumKind,
+    pub spec_count: usize,
+    pub spec_spread: f32,
+    pub phase_mode: PhaseMode,
+    pub phase_param_a: f32,
+    pub phase_param_b: f32,
     pub wave_speed: f32,
     pub amp_scale: f32,
     pub color_mode: ColorMode,
     pub decay_mode: DecayMode,
     pub paused: bool,
     pub time: f32,
-    pub dirty: bool,
+    /// Marks emitter buffer needs rebuild (lattice / freq / count changed).
+    pub emitters_dirty: bool,
+    /// Marks spectrum buffer needs rebuild.
+    pub spectrum_dirty: bool,
 }
 
 impl Default for SimState {
@@ -45,27 +55,34 @@ impl Default for SimState {
             base_k: 0.20,
             alpha: 0.5,
             beta: 6.0,
+            spectrum_kind: SpectrumKind::Single,
+            spec_count: 4,
+            spec_spread: 0.05,
+            phase_mode: PhaseMode::Zero,
+            phase_param_a: 0.0,
+            phase_param_b: 0.0,
             wave_speed: 80.0,
             amp_scale: 0.10,
             color_mode: ColorMode::Real,
             decay_mode: DecayMode::InvSqrtR,
             paused: false,
             time: 0.0,
-            dirty: true,
+            emitters_dirty: true,
+            spectrum_dirty: true,
         }
     }
 }
 
 impl SimState {
-    /// Build the emitter list (positions + per-emitter wavenumber).
-    /// Layout per emitter: [x, y, k, phase].
+    /// Per-emitter `[x, y, base_k, phase_seed]`.
     pub fn build_emitters(&self) -> Vec<[f32; 4]> {
         let positions = lattice::generate(self.lattice_kind, self.num_nodes, self.canvas_size);
         let center = self.canvas_size * 0.5;
         let max_r = self.canvas_size * 0.5;
         positions
             .into_iter()
-            .map(|[x, y]| {
+            .enumerate()
+            .map(|(i, [x, y])| {
                 let dx = x - center;
                 let dy = y - center;
                 let r = (dx * dx + dy * dy).sqrt();
@@ -73,9 +90,14 @@ impl SimState {
                 let k = self
                     .freq_fn
                     .eval(r_norm, self.base_k, self.alpha, self.beta);
-                [x, y, k, 0.0]
+                [x, y, k, node_phase_seed(i as u32)]
             })
             .collect()
+    }
+
+    pub fn build_spectrum(&self) -> Vec<[f32; 4]> {
+        self.spectrum_kind
+            .build(self.spec_count, MAX_SPEC as usize, self.spec_spread)
     }
 
     pub fn color_mode_u32(&self) -> u32 {
@@ -92,4 +114,13 @@ impl SimState {
             DecayMode::InvR => 2,
         }
     }
+}
+
+fn node_phase_seed(i: u32) -> f32 {
+    // xorshift-mix → uniform in [0, 2π).
+    let mut s = i.wrapping_mul(2_654_435_761).wrapping_add(0xdead_beef);
+    s ^= s >> 13;
+    s = s.wrapping_mul(0x85eb_ca6b);
+    s ^= s >> 16;
+    (s as f32 / u32::MAX as f32) * std::f32::consts::TAU
 }

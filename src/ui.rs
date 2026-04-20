@@ -4,6 +4,9 @@ use egui::{
 
 use crate::frequency::FrequencyFn;
 use crate::lattice::{self, LatticeKind};
+use crate::phase::PhaseMode;
+use crate::renderer::MAX_SPEC;
+use crate::spectrum::SpectrumKind;
 use crate::state::{ColorMode, DecayMode, SimState};
 
 pub const PANEL_WIDTH: f32 = 290.0;
@@ -48,7 +51,7 @@ pub fn install_style(ctx: &egui::Context) {
     };
 
     style.visuals = visuals;
-    style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
     style.spacing.slider_width = 160.0;
     style.spacing.button_padding = egui::vec2(8.0, 4.0);
     ctx.set_style(style);
@@ -59,135 +62,178 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
         .resizable(false)
         .exact_width(PANEL_WIDTH)
         .frame(egui::Frame {
-            inner_margin: Margin::symmetric(18.0, 18.0),
+            inner_margin: Margin::symmetric(18.0, 14.0),
             fill: Color32::WHITE,
             stroke: Stroke::new(1.0, Color32::from_gray(220)),
             ..Default::default()
         })
         .show(ctx, |ui| {
-            ui.vertical(|ui| {
-                ui.label(
-                    RichText::new("INTERFERENTIA")
-                        .font(FontId::proportional(18.0))
-                        .strong()
-                        .color(Color32::BLACK),
-                );
-                ui.add_space(2.0);
-                ui.label(
-                    RichText::new("a study of wave concurrence")
-                        .italics()
-                        .color(Color32::from_gray(90))
-                        .size(11.0),
-                );
-                divider(ui);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new("INTERFERENTIA")
+                            .font(FontId::proportional(18.0))
+                            .strong()
+                            .color(Color32::BLACK),
+                    );
+                    ui.add_space(2.0);
+                    ui.label(
+                        RichText::new("a study of wave concurrence")
+                            .italics()
+                            .color(Color32::from_gray(90))
+                            .size(11.0),
+                    );
+                    divider(ui);
 
-                section(ui, "CANVAS", |ui| {
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut sim.requested_canvas_px, 256..=4096)
-                                .step_by(64.0)
-                                .text("N px"),
-                        )
-                        .changed()
-                    {
-                        sim.dirty = true;
-                    }
-                });
+                    section(ui, "CANVAS", |ui| {
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut sim.requested_canvas_px, 256..=4096)
+                                    .step_by(64.0)
+                                    .text("N px"),
+                            )
+                            .changed()
+                        {
+                            sim.emitters_dirty = true;
+                        }
+                    });
 
-                section(ui, "LATTICE", |ui| {
-                    lattice_picker(ui, sim);
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut sim.num_nodes, 1..=1024)
-                                .integer()
-                                .text("nodes"),
-                        )
-                        .changed()
-                    {
-                        sim.dirty = true;
-                    }
-                });
+                    section(ui, "LATTICE", |ui| {
+                        lattice_picker(ui, sim);
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut sim.num_nodes, 1..=1024)
+                                    .integer()
+                                    .text("nodes"),
+                            )
+                            .changed()
+                        {
+                            sim.emitters_dirty = true;
+                        }
+                    });
 
-                section(ui, "FREQUENCY  k(r)", |ui| {
-                    frequency_picker(ui, sim);
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut sim.base_k, 0.005..=2.0)
-                                .text("k₀")
+                    section(ui, "FREQUENCY  k(r)", |ui| {
+                        frequency_picker(ui, sim);
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut sim.base_k, 0.005..=2.0)
+                                    .text("k₀")
+                                    .logarithmic(true),
+                            )
+                            .changed()
+                        {
+                            sim.emitters_dirty = true;
+                        }
+                        if sim.freq_fn.uses_alpha()
+                            && ui
+                                .add(egui::Slider::new(&mut sim.alpha, -2.0..=4.0).text("α"))
+                                .changed()
+                        {
+                            sim.emitters_dirty = true;
+                        }
+                        if sim.freq_fn.uses_beta()
+                            && ui
+                                .add(egui::Slider::new(&mut sim.beta, 0.1..=20.0).text("β"))
+                                .changed()
+                        {
+                            sim.emitters_dirty = true;
+                        }
+                    });
+
+                    section(ui, "SPECTRUM  per-node M", |ui| {
+                        spectrum_picker(ui, sim);
+                        if sim.spectrum_kind.uses_count()
+                            && ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut sim.spec_count,
+                                        1..=MAX_SPEC as usize,
+                                    )
+                                    .integer()
+                                    .text("M"),
+                                )
+                                .changed()
+                        {
+                            sim.spectrum_dirty = true;
+                        }
+                        if sim.spectrum_kind.uses_spread()
+                            && ui
+                                .add(
+                                    egui::Slider::new(&mut sim.spec_spread, 0.005..=1.0)
+                                        .text("Δ")
+                                        .logarithmic(true),
+                                )
+                                .changed()
+                        {
+                            sim.spectrum_dirty = true;
+                        }
+                    });
+
+                    section(ui, "PHASE  φ", |ui| {
+                        phase_picker(ui, sim);
+                        if sim.phase_mode.uses_param_a() {
+                            let (lo, hi) = sim.phase_mode.param_a_range();
+                            ui.add(
+                                egui::Slider::new(&mut sim.phase_param_a, lo..=hi)
+                                    .text(sim.phase_mode.param_a_label()),
+                            );
+                        }
+                    });
+
+                    section(ui, "PROPAGATION", |ui| {
+                        ui.add(
+                            egui::Slider::new(&mut sim.wave_speed, 5.0..=400.0)
+                                .text("c (px/s)"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut sim.amp_scale, 0.005..=2.0)
+                                .text("amp")
                                 .logarithmic(true),
-                        )
-                        .changed()
-                    {
-                        sim.dirty = true;
-                    }
-                    if sim.freq_fn.uses_alpha()
-                        && ui
-                            .add(egui::Slider::new(&mut sim.alpha, -2.0..=4.0).text("α"))
-                            .changed()
-                    {
-                        sim.dirty = true;
-                    }
-                    if sim.freq_fn.uses_beta()
-                        && ui
-                            .add(egui::Slider::new(&mut sim.beta, 0.1..=20.0).text("β"))
-                            .changed()
-                    {
-                        sim.dirty = true;
-                    }
-                });
+                        );
+                    });
 
-                section(ui, "PROPAGATION", |ui| {
-                    ui.add(
-                        egui::Slider::new(&mut sim.wave_speed, 5.0..=400.0).text("c (px/s)"),
+                    section(ui, "VIEW", |ui| {
+                        ui.radio_value(&mut sim.color_mode, ColorMode::Real, "ψ (real part)");
+                        ui.radio_value(
+                            &mut sim.color_mode,
+                            ColorMode::Intensity,
+                            "|ψ|² (intensity)",
+                        );
+                    });
+
+                    section(ui, "DECAY", |ui| {
+                        ui.radio_value(&mut sim.decay_mode, DecayMode::None, "none");
+                        ui.radio_value(&mut sim.decay_mode, DecayMode::InvSqrtR, "1 / √r");
+                        ui.radio_value(&mut sim.decay_mode, DecayMode::InvR, "1 / r");
+                    });
+
+                    divider(ui);
+
+                    ui.horizontal(|ui| {
+                        let label = if sim.paused { "▶  resume" } else { "❚❚  pause" };
+                        if ui.button(label).clicked() {
+                            sim.paused = !sim.paused;
+                        }
+                        if ui.button("↻  reset t").clicked() {
+                            sim.time = 0.0;
+                        }
+                    });
+
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(format!("t = {:>7.3}  s", sim.time))
+                            .monospace()
+                            .color(Color32::from_gray(80)),
                     );
-                    ui.add(
-                        egui::Slider::new(&mut sim.amp_scale, 0.005..=2.0)
-                            .text("amp")
-                            .logarithmic(true),
-                    );
-                });
-
-                section(ui, "VIEW", |ui| {
-                    ui.radio_value(&mut sim.color_mode, ColorMode::Real, "ψ (real part)");
-                    ui.radio_value(
-                        &mut sim.color_mode,
-                        ColorMode::Intensity,
-                        "|ψ|² (intensity)",
-                    );
-                });
-
-                section(ui, "DECAY", |ui| {
-                    ui.radio_value(&mut sim.decay_mode, DecayMode::None, "none");
-                    ui.radio_value(&mut sim.decay_mode, DecayMode::InvSqrtR, "1 / √r");
-                    ui.radio_value(&mut sim.decay_mode, DecayMode::InvR, "1 / r");
-                });
-
-                divider(ui);
-
-                ui.horizontal(|ui| {
-                    let label = if sim.paused { "▶  resume" } else { "❚❚  pause" };
-                    if ui.button(label).clicked() {
-                        sim.paused = !sim.paused;
-                    }
-                    if ui.button("↻  reset t").clicked() {
-                        sim.time = 0.0;
-                    }
-                });
-
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(format!("t = {:>7.3}  s", sim.time))
+                    ui.label(
+                        RichText::new(format!(
+                            "N = {:>4}    M = {:>2}    canvas = {} px",
+                            sim.num_nodes, sim.spec_count, sim.requested_canvas_px
+                        ))
                         .monospace()
                         .color(Color32::from_gray(80)),
-                );
-                ui.label(
-                    RichText::new(format!(
-                        "N = {:>4}    canvas = {} px",
-                        sim.num_nodes, sim.requested_canvas_px
-                    ))
-                    .monospace()
-                    .color(Color32::from_gray(80)),
-                );
+                    );
+                });
             });
         });
 }
@@ -237,7 +283,7 @@ fn lattice_picker(ui: &mut Ui, sim: &mut SimState) {
                 });
             if let Some(kind) = chosen {
                 sim.lattice_kind = kind;
-                sim.dirty = true;
+                sim.emitters_dirty = true;
                 ui.memory_mut(|m| m.close_popup());
             }
         },
@@ -287,14 +333,121 @@ fn frequency_picker(ui: &mut Ui, sim: &mut SimState) {
                 });
             if let Some(f) = chosen {
                 sim.freq_fn = f;
-                sim.dirty = true;
+                sim.emitters_dirty = true;
                 ui.memory_mut(|m| m.close_popup());
             }
         },
     );
 }
 
-/// Render the row that shows the current selection and opens the popup on click.
+fn spectrum_picker(ui: &mut Ui, sim: &mut SimState) {
+    let popup_id = ui.make_persistent_id("spec-picker");
+    let count = sim.spec_count;
+    let spread = sim.spec_spread;
+    let response = picker_button(
+        ui,
+        |painter, rect| draw_spectrum_thumb(painter, rect, sim.spectrum_kind, count, spread),
+        sim.spectrum_kind.label(),
+        sim.spectrum_kind.description(),
+    );
+    if response.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(popup_id));
+    }
+    egui::popup::popup_below_widget(
+        ui,
+        popup_id,
+        &response,
+        egui::PopupCloseBehavior::CloseOnClickOutside,
+        |ui| {
+            ui.set_min_width(280.0);
+            let cell_size = egui::vec2(82.0, 96.0);
+            let mut chosen: Option<SpectrumKind> = None;
+            egui::Grid::new("spec-grid")
+                .num_columns(3)
+                .spacing(egui::vec2(4.0, 4.0))
+                .show(ui, |ui| {
+                    for (i, &k) in SpectrumKind::ALL.iter().enumerate() {
+                        if thumb_cell(
+                            ui,
+                            cell_size,
+                            k == sim.spectrum_kind,
+                            k.label(),
+                            |painter, rect| draw_spectrum_thumb(painter, rect, k, count, spread),
+                        )
+                        .clicked()
+                        {
+                            chosen = Some(k);
+                        }
+                        if (i + 1) % 3 == 0 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            if let Some(k) = chosen {
+                sim.spectrum_kind = k;
+                sim.spectrum_dirty = true;
+                ui.memory_mut(|m| m.close_popup());
+            }
+        },
+    );
+}
+
+fn phase_picker(ui: &mut Ui, sim: &mut SimState) {
+    let popup_id = ui.make_persistent_id("phase-picker");
+    let param_a = sim.phase_param_a;
+    let response = picker_button(
+        ui,
+        |painter, rect| draw_phase_thumb(painter, rect, sim.phase_mode, param_a),
+        sim.phase_mode.label(),
+        sim.phase_mode.description(),
+    );
+    if response.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(popup_id));
+    }
+    egui::popup::popup_below_widget(
+        ui,
+        popup_id,
+        &response,
+        egui::PopupCloseBehavior::CloseOnClickOutside,
+        |ui| {
+            ui.set_min_width(280.0);
+            let cell_size = egui::vec2(82.0, 96.0);
+            let mut chosen: Option<PhaseMode> = None;
+            egui::Grid::new("phase-grid")
+                .num_columns(3)
+                .spacing(egui::vec2(4.0, 4.0))
+                .show(ui, |ui| {
+                    for (i, &m) in PhaseMode::ALL.iter().enumerate() {
+                        let preview_a = if m == sim.phase_mode {
+                            param_a
+                        } else {
+                            m.default_param_a()
+                        };
+                        if thumb_cell(
+                            ui,
+                            cell_size,
+                            m == sim.phase_mode,
+                            m.label(),
+                            |painter, rect| draw_phase_thumb(painter, rect, m, preview_a),
+                        )
+                        .clicked()
+                        {
+                            chosen = Some(m);
+                        }
+                        if (i + 1) % 3 == 0 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            if let Some(m) = chosen {
+                sim.phase_mode = m;
+                sim.phase_param_a = m.default_param_a();
+                ui.memory_mut(|mem| mem.close_popup());
+            }
+        },
+    );
+}
+
 fn picker_button(
     ui: &mut Ui,
     draw_thumb: impl FnOnce(&Painter, Rect),
@@ -339,7 +492,6 @@ fn picker_button(
         Color32::from_gray(110),
     );
 
-    // Caret indicator.
     let caret_x = rect.right() - 12.0;
     let caret_y = rect.center().y;
     painter.text(
@@ -395,16 +547,14 @@ fn thumb_cell(
     response
 }
 
-// ─── thumbnail painters ──────────────────────────────────────────────────
+// ─── thumbnails ──────────────────────────────────────────────────────────
 
 fn draw_lattice_thumb(painter: &Painter, rect: Rect, kind: LatticeKind) {
-    // Inscribed circle inside rect.
     let s = rect.width().min(rect.height());
     let center = rect.center();
     let half = s * 0.5;
     let frame = Rect::from_center_size(center, egui::vec2(s, s));
 
-    // Subtle bounding circle for context.
     painter.circle_stroke(
         center,
         half - 1.0,
@@ -425,7 +575,6 @@ fn draw_lattice_thumb(painter: &Painter, rect: Rect, kind: LatticeKind) {
 fn draw_freq_thumb(painter: &Painter, rect: Rect, f: FrequencyFn) {
     let plot = rect.shrink(3.0);
 
-    // Sample k(r) over r ∈ [0, 1] with default preview parameters.
     let mut samples = [0.0_f32; FREQ_PREVIEW_N];
     let mut min_v = f32::INFINITY;
     let mut max_v = f32::NEG_INFINITY;
@@ -447,7 +596,6 @@ fn draw_freq_thumb(painter: &Painter, rect: Rect, f: FrequencyFn) {
     }
     let span = (max_v - min_v).max(1e-3);
 
-    // Faint baseline at min value.
     painter.line_segment(
         [
             Pos2::new(plot.left(), plot.bottom()),
@@ -469,7 +617,171 @@ fn draw_freq_thumb(painter: &Painter, rect: Rect, f: FrequencyFn) {
     }
 }
 
-// ─── small helpers ───────────────────────────────────────────────────────
+fn draw_spectrum_thumb(
+    painter: &Painter,
+    rect: Rect,
+    kind: SpectrumKind,
+    count: usize,
+    spread: f32,
+) {
+    let plot = rect.shrink(3.0);
+    let spec = kind.build(count, MAX_SPEC as usize, spread);
+    if spec.is_empty() {
+        return;
+    }
+    let k_max = spec
+        .iter()
+        .map(|s| s[0])
+        .fold(0.0_f32, f32::max)
+        .max(1.0);
+    let amp_max = spec
+        .iter()
+        .map(|s| s[1])
+        .fold(0.0_f32, f32::max)
+        .max(1e-3);
+    let bar_w = (plot.width() / (spec.len().max(4)) as f32 * 0.55).clamp(1.5, 6.0);
+
+    painter.line_segment(
+        [
+            Pos2::new(plot.left(), plot.bottom()),
+            Pos2::new(plot.right(), plot.bottom()),
+        ],
+        Stroke::new(0.6, Color32::from_gray(220)),
+    );
+
+    for s in spec {
+        let nx = (s[0] / k_max).clamp(0.0, 1.0);
+        let h = (s[1] / amp_max).clamp(0.0, 1.0) * plot.height();
+        let cx = plot.left() + nx * plot.width();
+        let bar = Rect::from_min_size(
+            Pos2::new(cx - bar_w * 0.5, plot.bottom() - h),
+            egui::vec2(bar_w, h),
+        );
+        painter.rect_filled(bar, 0.0, Color32::BLACK);
+    }
+}
+
+fn draw_phase_thumb(painter: &Painter, rect: Rect, mode: PhaseMode, param_a: f32) {
+    let s = rect.width().min(rect.height());
+    let center = rect.center();
+    let radius = s * 0.45;
+    painter.circle_stroke(
+        center,
+        radius,
+        Stroke::new(0.6, Color32::from_gray(220)),
+    );
+
+    let stroke = Stroke::new(1.2, Color32::BLACK);
+    match mode {
+        PhaseMode::Zero => {
+            painter.circle_filled(center, 1.8, Color32::BLACK);
+        }
+        PhaseMode::Random => {
+            // Deterministic "random" dot scatter inside disc.
+            let mut state: u32 = 0x1234_5678;
+            for _ in 0..18 {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let u = ((state >> 8) as f32 / (1u32 << 24) as f32) * 2.0 - 1.0;
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let v = ((state >> 8) as f32 / (1u32 << 24) as f32) * 2.0 - 1.0;
+                if u * u + v * v <= 1.0 {
+                    painter.circle_filled(
+                        Pos2::new(center.x + u * radius, center.y + v * radius),
+                        1.4,
+                        Color32::BLACK,
+                    );
+                }
+            }
+        }
+        PhaseMode::Focus => {
+            for i in 1..=4 {
+                let r = radius * (i as f32 / 4.0);
+                painter.circle_stroke(center, r, stroke);
+            }
+        }
+        PhaseMode::Vortex => {
+            let m = (param_a.abs().round() as i32).max(1);
+            let segs = (m * 2).max(2) as usize;
+            for k in 0..segs {
+                if k & 1 == 1 {
+                    continue;
+                }
+                let theta0 = (k as f32 / segs as f32) * std::f32::consts::TAU;
+                let theta1 = ((k + 1) as f32 / segs as f32) * std::f32::consts::TAU;
+                let steps = 8;
+                let mut pts = Vec::with_capacity(steps + 2);
+                pts.push(center);
+                for j in 0..=steps {
+                    let t = theta0 + (theta1 - theta0) * (j as f32 / steps as f32);
+                    pts.push(Pos2::new(center.x + radius * t.cos(), center.y + radius * t.sin()));
+                }
+                painter.add(egui::Shape::convex_polygon(
+                    pts,
+                    Color32::BLACK,
+                    Stroke::NONE,
+                ));
+            }
+        }
+        PhaseMode::Gradient => {
+            let angle = param_a;
+            let nx = angle.cos();
+            let ny = angle.sin();
+            let tx = -ny;
+            let ty = nx;
+            let count = 6;
+            for i in -count..=count {
+                let f = i as f32 / count as f32;
+                let mid = Pos2::new(center.x + f * radius * nx, center.y + f * radius * ny);
+                let len = (radius * radius - (f * radius).powi(2)).max(0.0).sqrt();
+                let a = Pos2::new(mid.x - len * tx, mid.y - len * ty);
+                let b = Pos2::new(mid.x + len * tx, mid.y + len * ty);
+                painter.line_segment([a, b], Stroke::new(1.0, Color32::BLACK));
+            }
+        }
+        PhaseMode::Chirp => {
+            // Spiral.
+            let turns = 2.0;
+            let steps = 60;
+            let mut prev: Option<Pos2> = None;
+            for i in 0..=steps {
+                let t = i as f32 / steps as f32;
+                let theta = t * turns * std::f32::consts::TAU;
+                let r = radius * t;
+                let p = Pos2::new(center.x + r * theta.cos(), center.y + r * theta.sin());
+                if let Some(q) = prev {
+                    painter.line_segment([q, p], stroke);
+                }
+                prev = Some(p);
+            }
+        }
+        PhaseMode::Antiphase => {
+            let cols = 4;
+            let cell = (radius * 2.0) / cols as f32;
+            let origin = Pos2::new(center.x - radius, center.y - radius);
+            for j in 0..cols {
+                for i in 0..cols {
+                    let cx = origin.x + (i as f32 + 0.5) * cell;
+                    let cy = origin.y + (j as f32 + 0.5) * cell;
+                    let dx = cx - center.x;
+                    let dy = cy - center.y;
+                    if dx * dx + dy * dy > radius * radius {
+                        continue;
+                    }
+                    let parity = (i + j) & 1;
+                    if parity == 0 {
+                        painter.circle_filled(Pos2::new(cx, cy), cell * 0.18, Color32::BLACK);
+                    } else {
+                        painter.circle_stroke(
+                            Pos2::new(cx, cy),
+                            cell * 0.18,
+                            Stroke::new(1.0, Color32::BLACK),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
 
 fn section<R>(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui) -> R) -> R {
     ui.add_space(4.0);
