@@ -25,6 +25,10 @@ struct Uniforms {
     phase_mode: u32,
     phase_param_a: f32,
     phase_param_b: f32,
+    wave_shape: u32,
+    shape_param_a: f32,
+    shape_param_b: f32,
+    _pad: f32,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -91,6 +95,66 @@ fn node_phase(pos: vec2<f32>, base_k: f32, phase_seed: f32, idx: u32) -> f32 {
     return 0.0;
 }
 
+fn wave_arg(dx: f32, dy: f32, d: f32, k: f32, speed: f32, t: f32) -> f32 {
+    let s = u.wave_shape;
+    let a = u.shape_param_a;
+    let b = u.shape_param_b;
+    let omega = k * speed;
+
+    if (s == 0u) {
+        return k * d - omega * t;
+    }
+    if (s == 1u) {
+        // Petal: angular modulation of effective radius
+        let phi = atan2(dy, dx);
+        return k * d * (1.0 + a * cos(b * phi)) - omega * t;
+    }
+    if (s == 2u) {
+        // Wobbly: time-varying radial ripple
+        let phi = atan2(dy, dx);
+        return k * (d + a * sin(b * phi + 3.0 * t)) - omega * t;
+    }
+    if (s == 3u) {
+        // Elliptical: rotate then scale by eccentricity
+        let theta = b;
+        let cx = cos(theta);
+        let sx = sin(theta);
+        let u1 = dx * cx + dy * sx;
+        let v1 = -dx * sx + dy * cx;
+        let e = clamp(a, 0.0, 0.98);
+        let sa = 1.0 - e;
+        let sb = 1.0 + e;
+        let de = sqrt((u1 * u1) / (sa * sa) + (v1 * v1) / (sb * sb));
+        return k * de - omega * t;
+    }
+    if (s == 4u) {
+        // Diamond (L1)
+        let d1 = abs(dx) + abs(dy);
+        return k * d1 - omega * t;
+    }
+    if (s == 5u) {
+        // Square (L∞)
+        let di = max(abs(dx), abs(dy));
+        return k * di - omega * t;
+    }
+    if (s == 6u) {
+        // Plane / tilted
+        let nx = cos(a);
+        let ny = sin(a);
+        return k * (dx * nx + dy * ny) - omega * t;
+    }
+    if (s == 7u) {
+        // Archimedean spiral front
+        let phi = atan2(dy, dx);
+        return k * d + a * phi - omega * t;
+    }
+    if (s == 8u) {
+        // Breathing
+        return k * d - omega * t + a * sin(b * t);
+    }
+    return k * d - omega * t;
+}
+
 fn hsv2rgb(c: vec3<f32>) -> vec3<f32> {
     let k = vec4<f32>(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
     let p = abs(fract(vec3<f32>(c.x) + k.xyz) * 6.0 - vec3<f32>(k.w));
@@ -135,8 +199,8 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         for (var j: u32 = 0u; j < ms; j = j + 1u) {
             let s = spectrum[j];
             let k_eff = e.base_k * s.k_mult;
-            let omega = k_eff * speed;
-            let theta = k_eff * d - omega * t + phi_node + s.phase_off;
+            let base = wave_arg(dx, dy, d, k_eff, speed, t);
+            let theta = base + phi_node + s.phase_off;
             let a = decay * s.amp;
             let cre = a * cos(theta);
             let cim = a * sin(theta);

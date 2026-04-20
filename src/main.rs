@@ -3,6 +3,7 @@ mod frequency;
 mod lattice;
 mod phase;
 mod renderer;
+mod shape;
 mod spectrum;
 mod state;
 mod ui;

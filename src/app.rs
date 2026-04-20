@@ -240,6 +240,10 @@ impl App {
             phase_mode: self.sim.phase_mode.id(),
             phase_param_a: self.sim.phase_param_a,
             phase_param_b: self.sim.phase_param_b,
+            wave_shape: self.sim.wave_shape.id(),
+            shape_param_a: self.sim.shape_param_a,
+            shape_param_b: self.sim.shape_param_b,
+            _pad: 0.0,
         };
         state.renderer.update_uniforms(&state.queue, &uniforms);
 

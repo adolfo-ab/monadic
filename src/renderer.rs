@@ -22,6 +22,10 @@ pub struct Uniforms {
     pub phase_mode: u32,
     pub phase_param_a: f32,
     pub phase_param_b: f32,
+    pub wave_shape: u32,
+    pub shape_param_a: f32,
+    pub shape_param_b: f32,
+    pub _pad: f32,
 }
 
 #[repr(C)]

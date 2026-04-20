@@ -2,6 +2,7 @@ use crate::frequency::FrequencyFn;
 use crate::lattice::{self, LatticeKind};
 use crate::phase::PhaseMode;
 use crate::renderer::MAX_SPEC;
+use crate::shape::WaveShape;
 use crate::spectrum::SpectrumKind;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -34,6 +35,9 @@ pub struct SimState {
     pub phase_mode: PhaseMode,
     pub phase_param_a: f32,
     pub phase_param_b: f32,
+    pub wave_shape: WaveShape,
+    pub shape_param_a: f32,
+    pub shape_param_b: f32,
     pub wave_speed: f32,
     pub amp_scale: f32,
     pub color_mode: ColorMode,
@@ -62,6 +66,9 @@ impl Default for SimState {
             phase_mode: PhaseMode::Zero,
             phase_param_a: 0.0,
             phase_param_b: 0.0,
+            wave_shape: WaveShape::Circular,
+            shape_param_a: 0.0,
+            shape_param_b: 0.0,
             wave_speed: 80.0,
             amp_scale: 0.10,
             color_mode: ColorMode::Real,

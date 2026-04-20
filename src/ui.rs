@@ -7,6 +7,7 @@ use crate::frequency::FrequencyFn;
 use crate::lattice::{self, LatticeKind};
 use crate::phase::PhaseMode;
 use crate::renderer::MAX_SPEC;
+use crate::shape::WaveShape;
 use crate::spectrum::SpectrumKind;
 use crate::state::{ColorMode, DecayMode, SimState};
 
@@ -184,6 +185,24 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                             ui.add(
                                 egui::Slider::new(&mut sim.phase_param_a, lo..=hi)
                                     .text(sim.phase_mode.param_a_label()),
+                            );
+                        }
+                    });
+
+                    section(ui, "WAVEFRONT", |ui| {
+                        wave_shape_picker(ui, sim);
+                        if sim.wave_shape.uses_param_a() {
+                            let (lo, hi) = sim.wave_shape.param_a_range();
+                            ui.add(
+                                egui::Slider::new(&mut sim.shape_param_a, lo..=hi)
+                                    .text(sim.wave_shape.param_a_label()),
+                            );
+                        }
+                        if sim.wave_shape.uses_param_b() {
+                            let (lo, hi) = sim.wave_shape.param_b_range();
+                            ui.add(
+                                egui::Slider::new(&mut sim.shape_param_b, lo..=hi)
+                                    .text(sim.wave_shape.param_b_label()),
                             );
                         }
                     });
@@ -461,6 +480,64 @@ fn phase_picker(ui: &mut Ui, sim: &mut SimState) {
                 sim.phase_mode = m;
                 sim.phase_param_a = m.default_param_a();
                 ui.memory_mut(|mem| mem.close_popup());
+            }
+        },
+    );
+}
+
+fn wave_shape_picker(ui: &mut Ui, sim: &mut SimState) {
+    let popup_id = ui.make_persistent_id("shape-picker");
+    let param_a = sim.shape_param_a;
+    let param_b = sim.shape_param_b;
+    let response = picker_button(
+        ui,
+        |painter, rect| draw_shape_thumb(painter, rect, sim.wave_shape, param_a, param_b),
+        sim.wave_shape.label(),
+        sim.wave_shape.description(),
+    );
+    if response.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(popup_id));
+    }
+    egui::popup::popup_below_widget(
+        ui,
+        popup_id,
+        &response,
+        egui::PopupCloseBehavior::CloseOnClickOutside,
+        |ui| {
+            ui.set_min_width(280.0);
+            let cell_size = egui::vec2(82.0, 96.0);
+            let mut chosen: Option<WaveShape> = None;
+            egui::Grid::new("shape-grid")
+                .num_columns(3)
+                .spacing(egui::vec2(4.0, 4.0))
+                .show(ui, |ui| {
+                    for (i, &sh) in WaveShape::ALL.iter().enumerate() {
+                        let (pa, pb) = if sh == sim.wave_shape {
+                            (param_a, param_b)
+                        } else {
+                            (sh.default_param_a(), sh.default_param_b())
+                        };
+                        if thumb_cell(
+                            ui,
+                            cell_size,
+                            sh == sim.wave_shape,
+                            sh.label(),
+                            |painter, rect| draw_shape_thumb(painter, rect, sh, pa, pb),
+                        )
+                        .clicked()
+                        {
+                            chosen = Some(sh);
+                        }
+                        if (i + 1) % 3 == 0 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            if let Some(sh) = chosen {
+                sim.wave_shape = sh;
+                sim.shape_param_a = sh.default_param_a();
+                sim.shape_param_b = sh.default_param_b();
+                ui.memory_mut(|m| m.close_popup());
             }
         },
     );
@@ -882,6 +959,173 @@ fn draw_phase_thumb(painter: &Painter, rect: Rect, mode: PhaseMode, param_a: f32
                     }
                 }
             }
+        }
+    }
+}
+
+fn draw_shape_thumb(painter: &Painter, rect: Rect, shape: WaveShape, a: f32, b: f32) {
+    let s = rect.width().min(rect.height());
+    let center = rect.center();
+    let radius = s * 0.45;
+    painter.circle_stroke(
+        center,
+        radius,
+        Stroke::new(0.6, Color32::from_gray(220)),
+    );
+    let stroke = Stroke::new(1.2, Color32::BLACK);
+    let thin = Stroke::new(0.9, Color32::BLACK);
+
+    let poly = |painter: &Painter, f: &dyn Fn(f32) -> (f32, f32), steps: usize, stroke: Stroke| {
+        let mut prev: Option<Pos2> = None;
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            let (x, y) = f(t);
+            let p = Pos2::new(center.x + x, center.y + y);
+            if let Some(q) = prev {
+                painter.line_segment([q, p], stroke);
+            }
+            prev = Some(p);
+        }
+    };
+
+    match shape {
+        WaveShape::Circular => {
+            for i in 1..=4 {
+                let r = radius * (i as f32 / 4.0);
+                painter.circle_stroke(center, r, thin);
+            }
+        }
+        WaveShape::Petal => {
+            let n = b.max(1.0);
+            let depth = a.abs().clamp(0.0, 0.7);
+            for ring in 1..=3 {
+                let base_r = radius * (ring as f32 / 3.0);
+                poly(
+                    painter,
+                    &|t| {
+                        let phi = t * std::f32::consts::TAU;
+                        let r = base_r * (1.0 + depth * (n * phi).cos());
+                        (r * phi.cos(), r * phi.sin())
+                    },
+                    96,
+                    thin,
+                );
+            }
+        }
+        WaveShape::Wobbly => {
+            let n = b.max(1.0);
+            let depth = (a / 60.0).clamp(0.0, 0.5);
+            for ring in 1..=3 {
+                let base_r = radius * (ring as f32 / 3.0);
+                poly(
+                    painter,
+                    &|t| {
+                        let phi = t * std::f32::consts::TAU;
+                        let r = base_r + depth * radius * (n * phi).sin();
+                        (r * phi.cos(), r * phi.sin())
+                    },
+                    96,
+                    thin,
+                );
+            }
+        }
+        WaveShape::Elliptical => {
+            let e = a.clamp(0.0, 0.95);
+            let sa = 1.0 - e;
+            let sb = 1.0 + e;
+            let theta = b;
+            let ct = theta.cos();
+            let st = theta.sin();
+            for ring in 1..=3 {
+                let base_r = radius * (ring as f32 / 3.0);
+                poly(
+                    painter,
+                    &|t| {
+                        let phi = t * std::f32::consts::TAU;
+                        let u = base_r * sa * phi.cos();
+                        let v = base_r * sb * phi.sin();
+                        (u * ct - v * st, u * st + v * ct)
+                    },
+                    80,
+                    thin,
+                );
+            }
+        }
+        WaveShape::Diamond => {
+            for ring in 1..=4 {
+                let r = radius * (ring as f32 / 4.0);
+                let pts = vec![
+                    Pos2::new(center.x + r, center.y),
+                    Pos2::new(center.x, center.y + r),
+                    Pos2::new(center.x - r, center.y),
+                    Pos2::new(center.x, center.y - r),
+                    Pos2::new(center.x + r, center.y),
+                ];
+                for w in pts.windows(2) {
+                    painter.line_segment([w[0], w[1]], thin);
+                }
+            }
+        }
+        WaveShape::Square => {
+            for ring in 1..=4 {
+                let r = radius * (ring as f32 / 4.0);
+                let rc = Rect::from_center_size(center, egui::vec2(r * 2.0, r * 2.0));
+                painter.rect_stroke(rc, 0.0, thin);
+            }
+        }
+        WaveShape::Plane => {
+            let nx = a.cos();
+            let ny = a.sin();
+            let tx = -ny;
+            let ty = nx;
+            let count = 6;
+            for i in -count..=count {
+                let f = i as f32 / count as f32;
+                let mid = Pos2::new(center.x + f * radius * nx, center.y + f * radius * ny);
+                let len = (radius * radius - (f * radius).powi(2)).max(0.0).sqrt();
+                let p0 = Pos2::new(mid.x - len * tx, mid.y - len * ty);
+                let p1 = Pos2::new(mid.x + len * tx, mid.y + len * ty);
+                painter.line_segment([p0, p1], thin);
+            }
+        }
+        WaveShape::Spiral => {
+            let m = (a.abs().round() as i32).max(1);
+            let turns = 2.0;
+            let steps = 80;
+            for arm in 0..m {
+                let arm_off = arm as f32 * std::f32::consts::TAU / m as f32;
+                let mut prev: Option<Pos2> = None;
+                for i in 0..=steps {
+                    let t = i as f32 / steps as f32;
+                    let theta = t * turns * std::f32::consts::TAU + arm_off;
+                    let r = radius * t;
+                    let p = Pos2::new(center.x + r * theta.cos(), center.y + r * theta.sin());
+                    if let Some(q) = prev {
+                        painter.line_segment([q, p], stroke);
+                    }
+                    prev = Some(p);
+                }
+            }
+        }
+        WaveShape::Breathing => {
+            // Concentric rings with dashed outer "pulse" halo.
+            for i in 1..=3 {
+                let r = radius * (i as f32 / 4.0);
+                painter.circle_stroke(center, r, thin);
+            }
+            let halo = radius * 0.95;
+            let dashes = 24;
+            for d in 0..dashes {
+                if d & 1 == 1 {
+                    continue;
+                }
+                let t0 = d as f32 / dashes as f32 * std::f32::consts::TAU;
+                let t1 = (d as f32 + 1.0) / dashes as f32 * std::f32::consts::TAU;
+                let p0 = Pos2::new(center.x + halo * t0.cos(), center.y + halo * t0.sin());
+                let p1 = Pos2::new(center.x + halo * t1.cos(), center.y + halo * t1.sin());
+                painter.line_segment([p0, p1], stroke);
+            }
+            let _ = b;
         }
     }
 }
