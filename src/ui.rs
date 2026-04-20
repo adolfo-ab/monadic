@@ -70,7 +70,8 @@ pub fn install_style(ctx: &egui::Context) {
     style.spacing.item_spacing = egui::vec2(8.0, 6.0);
     style.spacing.slider_width = 160.0;
     style.spacing.slider_rail_height = 0.0;
-    style.spacing.button_padding = egui::vec2(8.0, 4.0);
+    style.spacing.button_padding = egui::vec2(10.0, 6.0);
+    style.spacing.icon_spacing = 8.0;
     ctx.set_style(style);
 }
 
@@ -99,6 +100,9 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                     ..Default::default()
                 })
                 .show_inside(ui, |ui| {
+                    egui::Frame::none()
+                        .inner_margin(Margin { left: 2.0, right: 0.0, top: 0.0, bottom: 0.0 })
+                        .show(ui, |ui| {
                     section(ui, "RESOLUTION", |ui| {
                         if slider(
                             ui,
@@ -136,12 +140,16 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                         .monospace()
                         .color(Color32::from_gray(80)),
                     );
+                    });
                 });
 
             egui::CentralPanel::default()
                 .frame(egui::Frame::none().fill(Color32::WHITE))
                 .show_inside(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::Frame::none()
+                    .inner_margin(Margin { left: 2.0, right: 0.0, top: 0.0, bottom: 0.0 })
+                    .show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.label(
                         RichText::new("monadic")
@@ -289,7 +297,8 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
 
                     section(ui, "VIEW", |ui| {
                         egui::ComboBox::from_id_salt("view-combo")
-                            .width(ui.available_width() - 28.0)
+                            .width(ui.available_width() - 8.0)
+                            .wrap_mode(egui::TextWrapMode::Extend)
                             .selected_text(color_mode_label(sim.color_mode))
                             .show_ui(ui, |ui| {
                                 for m in [
@@ -309,7 +318,8 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
 
                     section(ui, "DECAY", |ui| {
                         egui::ComboBox::from_id_salt("decay-combo")
-                            .width(ui.available_width() - 28.0)
+                            .width(ui.available_width() - 8.0)
+                            .wrap_mode(egui::TextWrapMode::Extend)
                             .selected_text(decay_mode_label(sim.decay_mode))
                             .show_ui(ui, |ui| {
                                 for m in [DecayMode::None, DecayMode::InvSqrtR, DecayMode::InvR] {
@@ -322,6 +332,7 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                             });
                     });
 
+                });
                 });
             });
                 });
