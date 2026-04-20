@@ -193,11 +193,21 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                     });
 
                     section(ui, "VIEW", |ui| {
-                        ui.radio_value(&mut sim.color_mode, ColorMode::Real, "ψ (real part)");
+                        ui.radio_value(&mut sim.color_mode, ColorMode::Real, "ψ real (mono)");
                         ui.radio_value(
                             &mut sim.color_mode,
                             ColorMode::Intensity,
-                            "|ψ|² (intensity)",
+                            "|ψ|² intensity (mono)",
+                        );
+                        ui.radio_value(
+                            &mut sim.color_mode,
+                            ColorMode::Domain,
+                            "domain (arg → hue)",
+                        );
+                        ui.radio_value(
+                            &mut sim.color_mode,
+                            ColorMode::Spectral,
+                            "spectral (per-freq hue)",
                         );
                     });
 

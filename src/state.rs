@@ -8,6 +8,8 @@ use crate::spectrum::SpectrumKind;
 pub enum ColorMode {
     Real,
     Intensity,
+    Domain,
+    Spectral,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -104,6 +106,8 @@ impl SimState {
         match self.color_mode {
             ColorMode::Real => 0,
             ColorMode::Intensity => 1,
+            ColorMode::Domain => 2,
+            ColorMode::Spectral => 3,
         }
     }
 
