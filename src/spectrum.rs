@@ -97,3 +97,54 @@ impl fmt::Display for SpectrumKind {
         f.write_str(self.label())
     }
 }
+
+#[derive(Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SpectrumMotion {
+    None,
+    Drift,
+    Aperiodic,
+    Cascade,
+    Wander,
+    Shimmer,
+    Breath,
+}
+
+impl SpectrumMotion {
+    pub const ALL: &'static [SpectrumMotion] = &[
+        Self::None,
+        Self::Drift,
+        Self::Aperiodic,
+        Self::Cascade,
+        Self::Wander,
+        Self::Shimmer,
+        Self::Breath,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::None => "static",
+            Self::Drift => "drift (periodic)",
+            Self::Aperiodic => "aperiodic (√2)",
+            Self::Cascade => "cascade (φ-detune)",
+            Self::Wander => "wander (3-freq)",
+            Self::Shimmer => "shimmer (amp)",
+            Self::Breath => "breath (envelope)",
+        }
+    }
+
+    pub fn id(&self) -> u32 {
+        match self {
+            Self::None => 0,
+            Self::Drift => 1,
+            Self::Aperiodic => 2,
+            Self::Cascade => 3,
+            Self::Wander => 4,
+            Self::Shimmer => 5,
+            Self::Breath => 6,
+        }
+    }
+
+    pub fn uses_params(&self) -> bool {
+        !matches!(self, Self::None)
+    }
+}

@@ -8,7 +8,7 @@ use crate::lattice::{self, LatticeKind};
 use crate::phase::PhaseMode;
 use crate::renderer::MAX_SPEC;
 use crate::shape::WaveShape;
-use crate::spectrum::SpectrumKind;
+use crate::spectrum::{SpectrumKind, SpectrumMotion};
 use crate::state::{ColorMode, DecayMode, PresetIo, SimState};
 
 pub const PANEL_WIDTH: f32 = 320.0;
@@ -250,37 +250,56 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
 
                     section(ui, "SPECTRUM  per-node M", |ui| {
                         spectrum_picker(ui, sim);
-                        let has_params = sim.spectrum_kind.uses_count()
-                            || sim.spectrum_kind.uses_spread();
-                        if has_params {
-                            config_popup_button(ui, "spec-config", |ui| {
-                                if sim.spectrum_kind.uses_count()
-                                    && slider(
-                                        ui,
-                                        egui::Slider::new(
-                                            &mut sim.spec_count,
-                                            1..=MAX_SPEC as usize,
-                                        )
-                                        .integer()
-                                        .text("M"),
+                        config_popup_button(ui, "spec-config", |ui| {
+                            if sim.spectrum_kind.uses_count()
+                                && slider(
+                                    ui,
+                                    egui::Slider::new(
+                                        &mut sim.spec_count,
+                                        1..=MAX_SPEC as usize,
                                     )
-                                    .changed()
-                                {
-                                    sim.spectrum_dirty = true;
-                                }
-                                if sim.spectrum_kind.uses_spread()
-                                    && slider(
-                                        ui,
-                                        egui::Slider::new(&mut sim.spec_spread, 0.005..=1.0)
-                                            .text("Δ")
-                                            .logarithmic(true),
-                                    )
-                                    .changed()
-                                {
-                                    sim.spectrum_dirty = true;
-                                }
-                            });
-                        }
+                                    .integer()
+                                    .text("M"),
+                                )
+                                .changed()
+                            {
+                                sim.spectrum_dirty = true;
+                            }
+                            if sim.spectrum_kind.uses_spread()
+                                && slider(
+                                    ui,
+                                    egui::Slider::new(&mut sim.spec_spread, 0.005..=1.0)
+                                        .text("Δ")
+                                        .logarithmic(true),
+                                )
+                                .changed()
+                            {
+                                sim.spectrum_dirty = true;
+                            }
+                            ui.add_space(6.0);
+                            ui.label(
+                                RichText::new("MOTION")
+                                    .size(10.0)
+                                    .color(Color32::from_gray(110))
+                                    .strong(),
+                            );
+                            for m in SpectrumMotion::ALL.iter().copied() {
+                                ui.selectable_value(&mut sim.spec_motion, m, m.label());
+                            }
+                            if sim.spec_motion.uses_params() {
+                                slider(
+                                    ui,
+                                    egui::Slider::new(&mut sim.spec_motion_rate, 0.01..=5.0)
+                                        .text("rate")
+                                        .logarithmic(true),
+                                );
+                                slider(
+                                    ui,
+                                    egui::Slider::new(&mut sim.spec_motion_depth, 0.0..=1.0)
+                                        .text("depth"),
+                                );
+                            }
+                        });
                     });
 
                     section(ui, "PHASE  φ", |ui| {

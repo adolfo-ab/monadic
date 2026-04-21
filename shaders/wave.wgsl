@@ -29,6 +29,10 @@ struct Uniforms {
     shape_param_a: f32,
     shape_param_b: f32,
     _pad: f32,
+    spec_motion: u32,
+    spec_motion_rate: f32,
+    spec_motion_depth: f32,
+    _pad2: f32,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -37,6 +41,51 @@ struct Uniforms {
 
 const PI: f32 = 3.14159265359;
 const MAX_SPEC: u32 = 16u;
+const SQRT2: f32 = 1.41421356;
+const SQRT3: f32 = 1.73205081;
+const PHI_INV: f32 = 0.61803399;
+const E_CONST: f32 = 2.71828183;
+
+// Returns (k_scale, amp_scale) for a given spectrum component index.
+fn spec_modulation(j: u32) -> vec2<f32> {
+    let m = u.spec_motion;
+    if (m == 0u) { return vec2<f32>(1.0, 1.0); }
+    let t = u.time;
+    let r = u.spec_motion_rate;
+    let d = u.spec_motion_depth;
+    let jf = f32(j);
+    if (m == 1u) {
+        // Drift: coherent per-component wobble
+        let k = 1.0 + d * sin(r * t + jf * 1.2);
+        return vec2<f32>(k, 1.0);
+    }
+    if (m == 2u) {
+        // Aperiodic: √2 ratio — never repeats
+        let w = 0.5 * (sin(r * t + jf) + sin(SQRT2 * r * t + jf * 1.3));
+        return vec2<f32>(1.0 + d * w, 1.0);
+    }
+    if (m == 3u) {
+        // Cascade: each component j detuned by φ-scaled rate (irrational ratios)
+        let rj = r * (1.0 + jf * PHI_INV);
+        return vec2<f32>(1.0 + d * sin(rj * t), 1.0);
+    }
+    if (m == 4u) {
+        // Wander: quasiperiodic sum of 3 irrational frequencies
+        let w = (sin(r * t + jf) + sin(PI * r * t + jf * 0.7) + sin(E_CONST * r * t + jf * 1.9)) / 3.0;
+        return vec2<f32>(1.0 + d * w, 1.0 + d * 0.3 * w);
+    }
+    if (m == 5u) {
+        // Shimmer: amp flicker only, fast irrational
+        let w = 0.5 * (sin(3.0 * r * t + jf * 7.1) + sin(3.0 * SQRT2 * r * t + jf * 2.3));
+        return vec2<f32>(1.0, max(0.0, 1.0 + d * w));
+    }
+    if (m == 6u) {
+        // Breath: slow amp envelope per component, phase-shifted by √3
+        let w = sin(r * t + jf * SQRT3);
+        return vec2<f32>(1.0, max(0.0, 1.0 + d * w));
+    }
+    return vec2<f32>(1.0, 1.0);
+}
 
 @vertex
 fn vs_main(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4<f32> {
@@ -198,10 +247,11 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
 
         for (var j: u32 = 0u; j < ms; j = j + 1u) {
             let s = spectrum[j];
-            let k_eff = e.base_k * s.k_mult;
+            let mod_ = spec_modulation(j);
+            let k_eff = e.base_k * s.k_mult * mod_.x;
             let base = wave_arg(dx, dy, d, k_eff, speed, t);
             let theta = base + phi_node + s.phase_off;
-            let a = decay * s.amp;
+            let a = decay * s.amp * mod_.y;
             let cre = a * cos(theta);
             let cim = a * sin(theta);
             re = re + cre;

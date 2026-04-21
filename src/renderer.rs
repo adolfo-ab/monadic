@@ -26,6 +26,10 @@ pub struct Uniforms {
     pub shape_param_a: f32,
     pub shape_param_b: f32,
     pub _pad: f32,
+    pub spec_motion: u32,
+    pub spec_motion_rate: f32,
+    pub spec_motion_depth: f32,
+    pub _pad2: f32,
 }
 
 #[repr(C)]

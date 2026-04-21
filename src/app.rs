@@ -269,6 +269,10 @@ impl App {
             shape_param_a: self.sim.shape_param_a,
             shape_param_b: self.sim.shape_param_b,
             _pad: 0.0,
+            spec_motion: self.sim.spec_motion.id(),
+            spec_motion_rate: self.sim.spec_motion_rate,
+            spec_motion_depth: self.sim.spec_motion_depth,
+            _pad2: 0.0,
         };
         state.renderer.update_uniforms(&state.queue, &uniforms);
 

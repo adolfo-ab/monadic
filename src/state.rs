@@ -3,7 +3,7 @@ use crate::lattice::{self, LatticeKind};
 use crate::phase::PhaseMode;
 use crate::renderer::MAX_SPEC;
 use crate::shape::WaveShape;
-use crate::spectrum::SpectrumKind;
+use crate::spectrum::{SpectrumKind, SpectrumMotion};
 
 #[derive(Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ColorMode {
@@ -35,6 +35,9 @@ pub struct SimState {
     pub spectrum_kind: SpectrumKind,
     pub spec_count: usize,
     pub spec_spread: f32,
+    pub spec_motion: SpectrumMotion,
+    pub spec_motion_rate: f32,
+    pub spec_motion_depth: f32,
     pub phase_mode: PhaseMode,
     pub phase_param_a: f32,
     pub phase_param_b: f32,
@@ -75,6 +78,9 @@ impl Default for SimState {
             spectrum_kind: SpectrumKind::Single,
             spec_count: 4,
             spec_spread: 0.05,
+            spec_motion: SpectrumMotion::None,
+            spec_motion_rate: 0.5,
+            spec_motion_depth: 0.25,
             phase_mode: PhaseMode::Zero,
             phase_param_a: 0.0,
             phase_param_b: 0.0,
