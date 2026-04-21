@@ -9,7 +9,7 @@ use crate::phase::PhaseMode;
 use crate::renderer::MAX_SPEC;
 use crate::shape::WaveShape;
 use crate::spectrum::{SpectrumKind, SpectrumMotion};
-use crate::state::{ColorMode, DecayMode, PresetIo, SimState};
+use crate::state::{ColorMode, DecayMode, Nonlinearity, PresetIo, SimState};
 
 pub const PANEL_WIDTH: f32 = 320.0;
 
@@ -354,6 +354,7 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                                     ColorMode::Domain,
                                     ColorMode::Spectral,
                                     ColorMode::Fft,
+                                    ColorMode::Reaction,
                                 ] {
                                     ui.selectable_value(
                                         &mut sim.color_mode,
@@ -363,6 +364,72 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                                 }
                             });
                     });
+
+                    section(ui, "DECOHERENCE", |ui| {
+                        slider(
+                            ui,
+                            egui::Slider::new(&mut sim.decoherence, 0.0..=1.0)
+                                .text("phase drift"),
+                        );
+                        slider(
+                            ui,
+                            egui::Slider::new(&mut sim.spec_jitter, 0.0..=1.0)
+                                .text("per-emitter jitter"),
+                        );
+                    });
+
+                    section(ui, "NONLINEARITY", |ui| {
+                        egui::ComboBox::from_id_salt("nl-combo")
+                            .width(ui.available_width() - 8.0)
+                            .wrap_mode(egui::TextWrapMode::Extend)
+                            .selected_text(sim.nonlinearity.label())
+                            .show_ui(ui, |ui| {
+                                for m in Nonlinearity::ALL.iter().copied() {
+                                    if ui.selectable_value(&mut sim.nonlinearity, m, m.label())
+                                        .clicked()
+                                    {
+                                        sim.nl_param = m.default_param();
+                                    }
+                                }
+                            });
+                        if !matches!(sim.nonlinearity, Nonlinearity::None) {
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.nl_param, 0.0..=5.0).text("p"),
+                            );
+                        }
+                    });
+
+                    if sim.color_mode == ColorMode::Reaction {
+                        section(ui, "REACTION-DIFFUSION", |ui| {
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.rd_feed, 0.0..=0.1).text("feed"),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.rd_kill, 0.0..=0.1).text("kill"),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.rd_coupling, 0.0..=1.0)
+                                    .text("wave coupling"),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.rd_dt, 0.1..=1.5).text("dt"),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.rd_substeps, 1..=32)
+                                    .integer()
+                                    .text("substeps"),
+                            );
+                            if ui.button("↻  reseed").clicked() {
+                                sim.rd_reset = true;
+                            }
+                        });
+                    }
 
                     section(ui, "DECAY", |ui| {
                         egui::ComboBox::from_id_salt("decay-combo")
@@ -426,6 +493,7 @@ fn color_mode_label(m: ColorMode) -> &'static str {
         ColorMode::Domain => "domain (arg → hue)",
         ColorMode::Spectral => "spectral (per-freq hue)",
         ColorMode::Fft => "FFT (2D frequency)",
+        ColorMode::Reaction => "reaction-diffusion",
     }
 }
 

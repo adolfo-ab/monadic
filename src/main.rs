@@ -3,6 +3,7 @@ mod fft;
 mod frequency;
 mod lattice;
 mod phase;
+mod rd;
 mod renderer;
 mod shape;
 mod spectrum;

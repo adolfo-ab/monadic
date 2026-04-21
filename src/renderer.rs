@@ -29,7 +29,11 @@ pub struct Uniforms {
     pub spec_motion: u32,
     pub spec_motion_rate: f32,
     pub spec_motion_depth: f32,
-    pub _pad2: f32,
+    pub decoherence: f32,
+    pub spec_jitter: f32,
+    pub nonlinearity: u32,
+    pub nl_param: f32,
+    pub _pad3: f32,
 }
 
 #[repr(C)]

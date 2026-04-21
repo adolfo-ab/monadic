@@ -7,6 +7,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
 use crate::fft::FftRenderer;
+use crate::rd::{self, RdRenderer};
 use crate::renderer::{BlitUniforms, Uniforms, WaveRenderer};
 use crate::state::{ColorMode, SimState};
 use crate::ui;
@@ -21,6 +22,7 @@ pub struct App {
 enum BlitSource {
     Sim,
     Fft,
+    Rd,
 }
 
 impl App {
@@ -41,6 +43,7 @@ struct RuntimeState {
     config: wgpu::SurfaceConfiguration,
     renderer: WaveRenderer,
     fft: FftRenderer,
+    rd: RdRenderer,
     blit_mode: BlitSource,
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
@@ -112,6 +115,8 @@ impl ApplicationHandler for App {
         let renderer = WaveRenderer::new(&device, format, self.sim.sim_resolution);
         let mut fft = FftRenderer::new(&device, &queue);
         fft.update_sim_view(&device, renderer.sim_view());
+        let mut rd = RdRenderer::new(&device, &queue);
+        rd.update_sim_view(&device, renderer.sim_view());
 
         let egui_ctx = egui::Context::default();
         ui::install_fonts(&egui_ctx);
@@ -142,6 +147,7 @@ impl ApplicationHandler for App {
             config,
             renderer,
             fft,
+            rd,
             blit_mode: BlitSource::Sim,
             egui_ctx,
             egui_state,
@@ -227,6 +233,7 @@ impl App {
             .ensure_sim_size(&state.device, self.sim.sim_resolution);
         if sim_resized {
             state.fft.update_sim_view(&state.device, state.renderer.sim_view());
+            state.rd.update_sim_view(&state.device, state.renderer.sim_view());
             // Rebind whichever source is currently active to the new view.
             match state.blit_mode {
                 BlitSource::Sim => state.renderer.restore_blit_source(&state.device),
@@ -234,6 +241,11 @@ impl App {
                     state
                         .renderer
                         .set_blit_source(&state.device, state.fft.display_view());
+                }
+                BlitSource::Rd => {
+                    state
+                        .renderer
+                        .set_blit_source(&state.device, state.rd.display_view());
                 }
             }
         }
@@ -272,7 +284,11 @@ impl App {
             spec_motion: self.sim.spec_motion.id(),
             spec_motion_rate: self.sim.spec_motion_rate,
             spec_motion_depth: self.sim.spec_motion_depth,
-            _pad2: 0.0,
+            decoherence: self.sim.decoherence,
+            spec_jitter: self.sim.spec_jitter,
+            nonlinearity: self.sim.nonlinearity.id(),
+            nl_param: self.sim.nl_param,
+            _pad3: 0.0,
         };
         state.renderer.update_uniforms(&state.queue, &uniforms);
 
@@ -342,8 +358,11 @@ impl App {
 
         // Ensure the blit samples the texture matching the current view mode,
         // and run the FFT pipeline when active.
-        let want_fft = self.sim.color_mode == ColorMode::Fft;
-        let want_mode = if want_fft { BlitSource::Fft } else { BlitSource::Sim };
+        let want_mode = match self.sim.color_mode {
+            ColorMode::Fft => BlitSource::Fft,
+            ColorMode::Reaction => BlitSource::Rd,
+            _ => BlitSource::Sim,
+        };
         if want_mode != state.blit_mode {
             match want_mode {
                 BlitSource::Sim => state.renderer.restore_blit_source(&state.device),
@@ -352,12 +371,40 @@ impl App {
                         .renderer
                         .set_blit_source(&state.device, state.fft.display_view());
                 }
+                BlitSource::Rd => {
+                    state
+                        .renderer
+                        .set_blit_source(&state.device, state.rd.display_view());
+                }
             }
             state.blit_mode = want_mode;
         }
-        if want_fft {
+        if want_mode == BlitSource::Fft {
             state.fft.run(&mut encoder);
             state.fft.draw_display(&mut encoder);
+        }
+        if want_mode == BlitSource::Rd {
+            if self.sim.rd_reset {
+                state.rd.request_reset();
+                self.sim.rd_reset = false;
+            }
+            let params = rd::Params {
+                n: rd::RD_N,
+                reset: 0,
+                _pad0: 0,
+                _pad1: 0,
+                feed: self.sim.rd_feed,
+                kill: self.sim.rd_kill,
+                coupling: self.sim.rd_coupling,
+                dt: self.sim.rd_dt,
+                diff_u: 0.16,
+                diff_v: 0.08,
+                time: self.sim.time,
+                _pad2: 0.0,
+            };
+            state.rd.update_params(&state.queue, &params);
+            state.rd.run(&mut encoder, self.sim.rd_substeps);
+            state.rd.draw_display(&mut encoder);
         }
 
         // Blit sim texture into canvas rect on the surface.

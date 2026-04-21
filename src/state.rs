@@ -12,6 +12,58 @@ pub enum ColorMode {
     Domain,
     Spectral,
     Fft,
+    Reaction,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Nonlinearity {
+    None,
+    Cubic,
+    SoftThreshold,
+    RadialSat,
+    Membrane,
+    PhaseWarp,
+}
+
+impl Nonlinearity {
+    pub const ALL: &'static [Nonlinearity] = &[
+        Self::None,
+        Self::Cubic,
+        Self::SoftThreshold,
+        Self::RadialSat,
+        Self::Membrane,
+        Self::PhaseWarp,
+    ];
+    pub fn id(&self) -> u32 {
+        match self {
+            Self::None => 0,
+            Self::Cubic => 1,
+            Self::SoftThreshold => 2,
+            Self::RadialSat => 3,
+            Self::Membrane => 4,
+            Self::PhaseWarp => 5,
+        }
+    }
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::None => "linear",
+            Self::Cubic => "cubic stiffen",
+            Self::SoftThreshold => "soft threshold",
+            Self::RadialSat => "radial saturate",
+            Self::Membrane => "membrane (binarize)",
+            Self::PhaseWarp => "phase warp",
+        }
+    }
+    pub fn default_param(&self) -> f32 {
+        match self {
+            Self::None => 0.0,
+            Self::Cubic => 0.5,
+            Self::SoftThreshold => 0.1,
+            Self::RadialSat => 0.5,
+            Self::Membrane => 0.3,
+            Self::PhaseWarp => 1.0,
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -48,6 +100,18 @@ pub struct SimState {
     pub amp_scale: f32,
     pub color_mode: ColorMode,
     pub decay_mode: DecayMode,
+    pub decoherence: f32,
+    pub spec_jitter: f32,
+    pub nonlinearity: Nonlinearity,
+    pub nl_param: f32,
+    // Reaction-diffusion parameters (Gray-Scott).
+    pub rd_feed: f32,
+    pub rd_kill: f32,
+    pub rd_coupling: f32,
+    pub rd_dt: f32,
+    pub rd_substeps: u32,
+    #[serde(skip, default)]
+    pub rd_reset: bool,
     pub paused: bool,
     pub time: f32,
     /// Marks emitter buffer needs rebuild (lattice / freq / count changed).
@@ -91,6 +155,16 @@ impl Default for SimState {
             amp_scale: 0.10,
             color_mode: ColorMode::Real,
             decay_mode: DecayMode::InvSqrtR,
+            decoherence: 0.0,
+            spec_jitter: 0.0,
+            nonlinearity: Nonlinearity::None,
+            nl_param: 0.0,
+            rd_feed: 0.037,
+            rd_kill: 0.06,
+            rd_coupling: 0.2,
+            rd_dt: 1.0,
+            rd_substeps: 8,
+            rd_reset: false,
             paused: false,
             time: 0.0,
             emitters_dirty: true,
@@ -137,6 +211,7 @@ impl SimState {
             // FFT mode feeds the wave shader with the real-field path;
             // post-processing handles the transform + colouring.
             ColorMode::Fft => 0,
+            ColorMode::Reaction => 0,
         }
     }
 

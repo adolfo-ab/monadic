@@ -32,7 +32,11 @@ struct Uniforms {
     spec_motion: u32,
     spec_motion_rate: f32,
     spec_motion_depth: f32,
-    _pad2: f32,
+    decoherence: f32,
+    spec_jitter: f32,
+    nonlinearity: u32,
+    nl_param: f32,
+    _pad3: f32,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -45,6 +49,27 @@ const SQRT2: f32 = 1.41421356;
 const SQRT3: f32 = 1.73205081;
 const PHI_INV: f32 = 0.61803399;
 const E_CONST: f32 = 2.71828183;
+
+// Deterministic hash → [0,1).
+fn hash2(a: u32, b: u32) -> f32 {
+    var h: u32 = a ^ (b + 0x9e3779b9u + (a << 6u) + (a >> 2u));
+    h = h ^ (h >> 13u);
+    h = h * 0x85ebca6bu;
+    h = h ^ (h >> 16u);
+    return f32(h) / 4294967296.0;
+}
+
+// Per-emitter quasi-random phase wander. Sum of irrationally-related sines
+// driven by time; phase-seeded by emitter index. Smooth, never repeats.
+fn phase_wander(i: u32, t: f32) -> f32 {
+    let a = hash2(i, 17u) * 6.2831853;
+    let b = hash2(i, 31u) * 6.2831853;
+    let c = hash2(i, 53u) * 6.2831853;
+    let w = sin(0.37 * t + a)
+          + sin(SQRT2 * 0.37 * t + b)
+          + sin(PHI_INV * 0.37 * t + c);
+    return w / 3.0;
+}
 
 // Returns (k_scale, amp_scale) for a given spectrum component index.
 fn spec_modulation(j: u32) -> vec2<f32> {
@@ -243,15 +268,26 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
             decay = 1.0 / safe_d;
         }
 
-        let phi_node = node_phase(e.pos, e.base_k, e.phase_seed, i);
+        var phi_node = node_phase(e.pos, e.base_k, e.phase_seed, i);
+        if (u.decoherence > 0.0) {
+            phi_node = phi_node + u.decoherence * PI * phase_wander(i, t);
+        }
 
         for (var j: u32 = 0u; j < ms; j = j + 1u) {
             let s = spectrum[j];
             let mod_ = spec_modulation(j);
-            let k_eff = e.base_k * s.k_mult * mod_.x;
+            var k_mult_eff = s.k_mult * mod_.x;
+            var amp_eff = s.amp * mod_.y;
+            if (u.spec_jitter > 0.0) {
+                let kj = (hash2(i, j * 2u + 1u) - 0.5) * 2.0;
+                let aj = (hash2(i, j * 2u + 7u) - 0.5) * 2.0;
+                k_mult_eff = k_mult_eff * (1.0 + u.spec_jitter * kj);
+                amp_eff = amp_eff * max(0.0, 1.0 + u.spec_jitter * aj);
+            }
+            let k_eff = e.base_k * k_mult_eff;
             let base = wave_arg(dx, dy, d, k_eff, speed, t);
             let theta = base + phi_node + s.phase_off;
-            let a = decay * s.amp * mod_.y;
+            let a = decay * amp_eff;
             let cre = a * cos(theta);
             let cim = a * sin(theta);
             re = re + cre;
@@ -260,6 +296,42 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
                 re_arr[j] = re_arr[j] + cre;
                 im_arr[j] = im_arr[j] + cim;
             }
+        }
+    }
+
+    // Nonlinearity: bend the complex field before colorization.
+    // Acts on (re,im) symmetrically so |ψ| and arg both reshape.
+    let nl = u.nonlinearity;
+    if (nl != 0u) {
+        let p = u.nl_param;
+        if (nl == 1u) {
+            // Cubic stiffening: re + p*re^3 (per component)
+            re = re + p * re * re * re;
+            im = im + p * im * im * im;
+        } else if (nl == 2u) {
+            // Soft threshold: shrink by p, clip to zero
+            let sr = sign(re); let ar = max(abs(re) - p, 0.0);
+            let si = sign(im); let ai = max(abs(im) - p, 0.0);
+            re = sr * ar; im = si * ai;
+        } else if (nl == 3u) {
+            // Radial saturation: scale (re,im) by tanh(|ψ|/p)/(|ψ|/p+ε)
+            let mag = sqrt(re * re + im * im);
+            let g = max(p, 1e-4);
+            let k = tanh(mag / g) * g / max(mag, 1e-6);
+            re = re * k; im = im * k;
+        } else if (nl == 4u) {
+            // Hard binarize by noise-threshold (membrane look)
+            let thr = p * 0.5 * (re + im);
+            re = select(-1.0, 1.0, re > thr);
+            im = select(-1.0, 1.0, im > thr);
+        } else if (nl == 5u) {
+            // Phase-warp: rotate by amount proportional to |ψ|
+            let mag = sqrt(re * re + im * im);
+            let a = p * mag;
+            let cr = cos(a); let sr = sin(a);
+            let nre = re * cr - im * sr;
+            let nim = re * sr + im * cr;
+            re = nre; im = nim;
         }
     }
 
