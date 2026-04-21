@@ -1,4 +1,5 @@
 mod app;
+mod fft;
 mod frequency;
 mod lattice;
 mod phase;

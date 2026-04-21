@@ -289,13 +289,41 @@ impl WaveRenderer {
         }
     }
 
-    pub fn ensure_sim_size(&mut self, device: &wgpu::Device, size: u32) {
+    /// Returns true if the sim texture was (re)created.
+    pub fn ensure_sim_size(&mut self, device: &wgpu::Device, size: u32) -> bool {
         let size = size.max(1);
         if size == self.sim_size {
-            return;
+            return false;
         }
         self.sim_size = size;
         self.sim_view = create_sim_view(device, size);
+        self.blit_bind_group = create_blit_bind_group(
+            device,
+            &self.blit_bgl,
+            &self.blit_uniform_buffer,
+            &self.sim_view,
+            &self.blit_sampler,
+        );
+        true
+    }
+
+    pub fn sim_view(&self) -> &wgpu::TextureView {
+        &self.sim_view
+    }
+
+    /// Rebuild the blit bind group so it samples an external texture view
+    /// (e.g. the FFT display output) instead of the sim texture.
+    pub fn set_blit_source(&mut self, device: &wgpu::Device, view: &wgpu::TextureView) {
+        self.blit_bind_group = create_blit_bind_group(
+            device,
+            &self.blit_bgl,
+            &self.blit_uniform_buffer,
+            view,
+            &self.blit_sampler,
+        );
+    }
+
+    pub fn restore_blit_source(&mut self, device: &wgpu::Device) {
         self.blit_bind_group = create_blit_bind_group(
             device,
             &self.blit_bgl,

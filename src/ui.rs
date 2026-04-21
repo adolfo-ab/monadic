@@ -334,6 +334,7 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                                     ColorMode::Intensity,
                                     ColorMode::Domain,
                                     ColorMode::Spectral,
+                                    ColorMode::Fft,
                                 ] {
                                     ui.selectable_value(
                                         &mut sim.color_mode,
@@ -405,6 +406,7 @@ fn color_mode_label(m: ColorMode) -> &'static str {
         ColorMode::Intensity => "|ψ|² intensity (mono)",
         ColorMode::Domain => "domain (arg → hue)",
         ColorMode::Spectral => "spectral (per-freq hue)",
+        ColorMode::Fft => "FFT (2D frequency)",
     }
 }
 

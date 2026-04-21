@@ -11,6 +11,7 @@ pub enum ColorMode {
     Intensity,
     Domain,
     Spectral,
+    Fft,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -127,6 +128,9 @@ impl SimState {
             ColorMode::Intensity => 1,
             ColorMode::Domain => 2,
             ColorMode::Spectral => 3,
+            // FFT mode feeds the wave shader with the real-field path;
+            // post-processing handles the transform + colouring.
+            ColorMode::Fft => 0,
         }
     }
 

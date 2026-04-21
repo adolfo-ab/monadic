@@ -6,14 +6,21 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
+use crate::fft::FftRenderer;
 use crate::renderer::{BlitUniforms, Uniforms, WaveRenderer};
-use crate::state::SimState;
+use crate::state::{ColorMode, SimState};
 use crate::ui;
 
 pub struct App {
     state: Option<RuntimeState>,
     sim: SimState,
     last_frame: Instant,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum BlitSource {
+    Sim,
+    Fft,
 }
 
 impl App {
@@ -33,6 +40,8 @@ struct RuntimeState {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     renderer: WaveRenderer,
+    fft: FftRenderer,
+    blit_mode: BlitSource,
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -101,6 +110,8 @@ impl ApplicationHandler for App {
         surface.configure(&device, &config);
 
         let renderer = WaveRenderer::new(&device, format, self.sim.sim_resolution);
+        let mut fft = FftRenderer::new(&device, &queue);
+        fft.update_sim_view(&device, renderer.sim_view());
 
         let egui_ctx = egui::Context::default();
         ui::install_fonts(&egui_ctx);
@@ -130,6 +141,8 @@ impl ApplicationHandler for App {
             queue,
             config,
             renderer,
+            fft,
+            blit_mode: BlitSource::Sim,
             egui_ctx,
             egui_state,
             egui_renderer,
@@ -209,9 +222,21 @@ impl App {
         ];
 
         // Resize offscreen sim texture if requested resolution changed.
-        state
+        let sim_resized = state
             .renderer
             .ensure_sim_size(&state.device, self.sim.sim_resolution);
+        if sim_resized {
+            state.fft.update_sim_view(&state.device, state.renderer.sim_view());
+            // Rebind whichever source is currently active to the new view.
+            match state.blit_mode {
+                BlitSource::Sim => state.renderer.restore_blit_source(&state.device),
+                BlitSource::Fft => {
+                    state
+                        .renderer
+                        .set_blit_source(&state.device, state.fft.display_view());
+                }
+            }
+        }
 
         if self.sim.emitters_dirty {
             let emitters = self.sim.build_emitters();
@@ -310,6 +335,26 @@ impl App {
 
         // Offscreen sim pass.
         state.renderer.render_sim(&mut encoder);
+
+        // Ensure the blit samples the texture matching the current view mode,
+        // and run the FFT pipeline when active.
+        let want_fft = self.sim.color_mode == ColorMode::Fft;
+        let want_mode = if want_fft { BlitSource::Fft } else { BlitSource::Sim };
+        if want_mode != state.blit_mode {
+            match want_mode {
+                BlitSource::Sim => state.renderer.restore_blit_source(&state.device),
+                BlitSource::Fft => {
+                    state
+                        .renderer
+                        .set_blit_source(&state.device, state.fft.display_view());
+                }
+            }
+            state.blit_mode = want_mode;
+        }
+        if want_fft {
+            state.fft.run(&mut encoder);
+            state.fft.draw_display(&mut encoder);
+        }
 
         // Blit sim texture into canvas rect on the surface.
         {
