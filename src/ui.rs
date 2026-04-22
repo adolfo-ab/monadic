@@ -174,7 +174,9 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
             egui::CentralPanel::default()
                 .frame(egui::Frame::none().fill(Color32::WHITE))
                 .show_inside(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
                 egui::Frame::none()
                     .inner_margin(Margin { left: 2.0, right: 0.0, top: 0.0, bottom: 0.0 })
                     .show(ui, |ui| {
@@ -365,41 +367,6 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                             });
                     });
 
-                    section(ui, "DECOHERENCE", |ui| {
-                        slider(
-                            ui,
-                            egui::Slider::new(&mut sim.decoherence, 0.0..=1.0)
-                                .text("phase drift"),
-                        );
-                        slider(
-                            ui,
-                            egui::Slider::new(&mut sim.spec_jitter, 0.0..=1.0)
-                                .text("per-emitter jitter"),
-                        );
-                    });
-
-                    section(ui, "NONLINEARITY", |ui| {
-                        egui::ComboBox::from_id_salt("nl-combo")
-                            .width(ui.available_width() - 8.0)
-                            .wrap_mode(egui::TextWrapMode::Extend)
-                            .selected_text(sim.nonlinearity.label())
-                            .show_ui(ui, |ui| {
-                                for m in Nonlinearity::ALL.iter().copied() {
-                                    if ui.selectable_value(&mut sim.nonlinearity, m, m.label())
-                                        .clicked()
-                                    {
-                                        sim.nl_param = m.default_param();
-                                    }
-                                }
-                            });
-                        if !matches!(sim.nonlinearity, Nonlinearity::None) {
-                            slider(
-                                ui,
-                                egui::Slider::new(&mut sim.nl_param, 0.0..=5.0).text("p"),
-                            );
-                        }
-                    });
-
                     if sim.color_mode == ColorMode::Reaction {
                         section(ui, "REACTION-DIFFUSION", |ui| {
                             slider(
@@ -442,20 +409,64 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                         });
                     }
 
-                    section(ui, "DECAY", |ui| {
-                        egui::ComboBox::from_id_salt("decay-combo")
-                            .width(ui.available_width() - 8.0)
-                            .wrap_mode(egui::TextWrapMode::Extend)
-                            .selected_text(decay_mode_label(sim.decay_mode))
-                            .show_ui(ui, |ui| {
-                                for m in [DecayMode::None, DecayMode::InvSqrtR, DecayMode::InvR] {
-                                    ui.selectable_value(
-                                        &mut sim.decay_mode,
-                                        m,
-                                        decay_mode_label(m),
-                                    );
-                                }
-                            });
+                    advanced_group(ui, |ui| {
+                        section(ui, "DECOHERENCE", |ui| {
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.decoherence, 0.0..=1.0)
+                                    .text("phase drift"),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.spec_jitter, 0.0..=1.0)
+                                    .text("per-emitter jitter"),
+                            );
+                        });
+
+                        section(ui, "NONLINEARITY", |ui| {
+                            egui::ComboBox::from_id_salt("nl-combo")
+                                .width(ui.available_width() - 8.0)
+                                .wrap_mode(egui::TextWrapMode::Extend)
+                                .selected_text(sim.nonlinearity.label())
+                                .show_ui(ui, |ui| {
+                                    for m in Nonlinearity::ALL.iter().copied() {
+                                        if ui
+                                            .selectable_value(
+                                                &mut sim.nonlinearity,
+                                                m,
+                                                m.label(),
+                                            )
+                                            .clicked()
+                                        {
+                                            sim.nl_param = m.default_param();
+                                        }
+                                    }
+                                });
+                            if !matches!(sim.nonlinearity, Nonlinearity::None) {
+                                slider(
+                                    ui,
+                                    egui::Slider::new(&mut sim.nl_param, 0.0..=5.0).text("p"),
+                                );
+                            }
+                        });
+
+                        section(ui, "DECAY", |ui| {
+                            egui::ComboBox::from_id_salt("decay-combo")
+                                .width(ui.available_width() - 8.0)
+                                .wrap_mode(egui::TextWrapMode::Extend)
+                                .selected_text(decay_mode_label(sim.decay_mode))
+                                .show_ui(ui, |ui| {
+                                    for m in
+                                        [DecayMode::None, DecayMode::InvSqrtR, DecayMode::InvR]
+                                    {
+                                        ui.selectable_value(
+                                            &mut sim.decay_mode,
+                                            m,
+                                            decay_mode_label(m),
+                                        );
+                                    }
+                                });
+                        });
                     });
 
                 });
@@ -1411,6 +1422,19 @@ fn section<R>(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui) -> R) -> R {
     let r = body(ui);
     ui.add_space(6.0);
     r
+}
+
+fn advanced_group(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
+    divider(ui);
+    egui::CollapsingHeader::new(
+        RichText::new("ADVANCED")
+            .size(10.0)
+            .color(Color32::from_gray(110))
+            .strong(),
+    )
+    .id_salt("advanced-group")
+    .default_open(false)
+    .show_unindented(ui, body);
 }
 
 fn slider(ui: &mut Ui, s: egui::Slider<'_>) -> Response {
