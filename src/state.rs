@@ -13,6 +13,7 @@ pub enum ColorMode {
     Spectral,
     Fft,
     Reaction,
+    Fitzhugh,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -114,6 +115,19 @@ pub struct SimState {
     pub rd_emit_rate: f32,
     #[serde(skip, default)]
     pub rd_reset: bool,
+    // FitzHugh-Nagumo excitable-medium parameters.
+    pub fhn_diff_u: f32,
+    pub fhn_diff_v: f32,
+    pub fhn_epsilon: f32,
+    pub fhn_a: f32,
+    pub fhn_b: f32,
+    pub fhn_coupling: f32,
+    pub fhn_dt: f32,
+    pub fhn_substeps: u32,
+    pub fhn_emit_radius: f32,
+    pub fhn_emit_rate: f32,
+    #[serde(skip, default)]
+    pub fhn_reset: bool,
     pub paused: bool,
     pub time: f32,
     /// Marks emitter buffer needs rebuild (lattice / freq / count changed).
@@ -169,6 +183,17 @@ impl Default for SimState {
             rd_emit_radius: 0.02,
             rd_emit_rate: 0.35,
             rd_reset: false,
+            fhn_diff_u: 1.0,
+            fhn_diff_v: 0.0,
+            fhn_epsilon: 0.08,
+            fhn_a: 0.7,
+            fhn_b: 0.8,
+            fhn_coupling: 0.5,
+            fhn_dt: 0.1,
+            fhn_substeps: 8,
+            fhn_emit_radius: 0.03,
+            fhn_emit_rate: 0.6,
+            fhn_reset: false,
             paused: false,
             time: 0.0,
             emitters_dirty: true,
@@ -216,6 +241,7 @@ impl SimState {
             // post-processing handles the transform + colouring.
             ColorMode::Fft => 0,
             ColorMode::Reaction => 0,
+            ColorMode::Fitzhugh => 0,
         }
     }
 

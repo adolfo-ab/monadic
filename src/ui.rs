@@ -357,6 +357,7 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                                     ColorMode::Spectral,
                                     ColorMode::Fft,
                                     ColorMode::Reaction,
+                                    ColorMode::Fitzhugh,
                                 ] {
                                     ui.selectable_value(
                                         &mut sim.color_mode,
@@ -405,6 +406,64 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                             );
                             if ui.button("↻  reseed").clicked() {
                                 sim.rd_reset = true;
+                            }
+                        });
+                    }
+
+                    if sim.color_mode == ColorMode::Fitzhugh {
+                        section(ui, "FITZHUGH-NAGUMO", |ui| {
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.fhn_epsilon, 0.005..=0.3)
+                                    .text("ε (timescale)")
+                                    .logarithmic(true),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.fhn_a, -1.5..=1.5).text("a"),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.fhn_b, 0.0..=2.0).text("b"),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.fhn_diff_u, 0.0..=3.0).text("D_u"),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.fhn_diff_v, 0.0..=1.0).text("D_v"),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.fhn_coupling, 0.0..=2.0)
+                                    .text("wave coupling"),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.fhn_dt, 0.01..=0.3)
+                                    .text("dt")
+                                    .logarithmic(true),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.fhn_substeps, 1..=32)
+                                    .integer()
+                                    .text("substeps"),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.fhn_emit_radius, 0.002..=0.1)
+                                    .text("emit radius")
+                                    .logarithmic(true),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.fhn_emit_rate, 0.0..=2.0)
+                                    .text("emit rate"),
+                            );
+                            if ui.button("↻  reseed").clicked() {
+                                sim.fhn_reset = true;
                             }
                         });
                     }
@@ -516,6 +575,7 @@ fn color_mode_label(m: ColorMode) -> &'static str {
         ColorMode::Spectral => "spectral (per-freq hue)",
         ColorMode::Fft => "FFT (2D frequency)",
         ColorMode::Reaction => "reaction-diffusion",
+        ColorMode::Fitzhugh => "fitzhugh-nagumo",
     }
 }
 

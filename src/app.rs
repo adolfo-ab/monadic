@@ -7,6 +7,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
 use crate::fft::FftRenderer;
+use crate::fhn::{self, FhnRenderer};
 use crate::rd::{self, RdRenderer};
 use crate::renderer::{BlitUniforms, Uniforms, WaveRenderer};
 use crate::state::{ColorMode, SimState};
@@ -23,6 +24,7 @@ enum BlitSource {
     Sim,
     Fft,
     Rd,
+    Fhn,
 }
 
 impl App {
@@ -44,6 +46,7 @@ struct RuntimeState {
     renderer: WaveRenderer,
     fft: FftRenderer,
     rd: RdRenderer,
+    fhn: FhnRenderer,
     blit_mode: BlitSource,
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
@@ -117,6 +120,8 @@ impl ApplicationHandler for App {
         fft.update_sim_view(&device, renderer.sim_view());
         let mut rd = RdRenderer::new(&device, &queue);
         rd.update_bindings(&device, renderer.sim_view(), renderer.emitter_buffer());
+        let mut fhn = FhnRenderer::new(&device, &queue);
+        fhn.update_bindings(&device, renderer.sim_view(), renderer.emitter_buffer());
 
         let egui_ctx = egui::Context::default();
         ui::install_fonts(&egui_ctx);
@@ -148,6 +153,7 @@ impl ApplicationHandler for App {
             renderer,
             fft,
             rd,
+            fhn,
             blit_mode: BlitSource::Sim,
             egui_ctx,
             egui_state,
@@ -238,6 +244,11 @@ impl App {
                 state.renderer.sim_view(),
                 state.renderer.emitter_buffer(),
             );
+            state.fhn.update_bindings(
+                &state.device,
+                state.renderer.sim_view(),
+                state.renderer.emitter_buffer(),
+            );
             // Rebind whichever source is currently active to the new view.
             match state.blit_mode {
                 BlitSource::Sim => state.renderer.restore_blit_source(&state.device),
@@ -250,6 +261,11 @@ impl App {
                     state
                         .renderer
                         .set_blit_source(&state.device, state.rd.display_view());
+                }
+                BlitSource::Fhn => {
+                    state
+                        .renderer
+                        .set_blit_source(&state.device, state.fhn.display_view());
                 }
             }
         }
@@ -365,6 +381,7 @@ impl App {
         let want_mode = match self.sim.color_mode {
             ColorMode::Fft => BlitSource::Fft,
             ColorMode::Reaction => BlitSource::Rd,
+            ColorMode::Fitzhugh => BlitSource::Fhn,
             _ => BlitSource::Sim,
         };
         if want_mode != state.blit_mode {
@@ -379,6 +396,11 @@ impl App {
                     state
                         .renderer
                         .set_blit_source(&state.device, state.rd.display_view());
+                }
+                BlitSource::Fhn => {
+                    state
+                        .renderer
+                        .set_blit_source(&state.device, state.fhn.display_view());
                 }
             }
             state.blit_mode = want_mode;
@@ -410,6 +432,30 @@ impl App {
             let substeps = if self.sim.paused { 0 } else { self.sim.rd_substeps };
             state.rd.run(&mut encoder, substeps);
             state.rd.draw_display(&mut encoder);
+        }
+        if want_mode == BlitSource::Fhn {
+            if self.sim.fhn_reset {
+                state.fhn.request_reset();
+                self.sim.fhn_reset = false;
+            }
+            let params = fhn::Params {
+                n: fhn::FHN_N,
+                num_emitters: self.sim.num_nodes as u32,
+                emit_radius: self.sim.fhn_emit_radius,
+                emit_rate: self.sim.fhn_emit_rate,
+                diff_u: self.sim.fhn_diff_u,
+                diff_v: self.sim.fhn_diff_v,
+                epsilon: self.sim.fhn_epsilon,
+                a: self.sim.fhn_a,
+                b: self.sim.fhn_b,
+                coupling: self.sim.fhn_coupling,
+                dt: self.sim.fhn_dt,
+                time: self.sim.time,
+            };
+            state.fhn.update_params(&state.queue, &params);
+            let substeps = if self.sim.paused { 0 } else { self.sim.fhn_substeps };
+            state.fhn.run(&mut encoder, substeps);
+            state.fhn.draw_display(&mut encoder);
         }
 
         // Blit sim texture into canvas rect on the surface.
