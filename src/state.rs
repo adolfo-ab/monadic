@@ -110,6 +110,8 @@ pub struct SimState {
     pub rd_coupling: f32,
     pub rd_dt: f32,
     pub rd_substeps: u32,
+    pub rd_emit_radius: f32,
+    pub rd_emit_rate: f32,
     #[serde(skip, default)]
     pub rd_reset: bool,
     pub paused: bool,
@@ -164,6 +166,8 @@ impl Default for SimState {
             rd_coupling: 0.2,
             rd_dt: 1.0,
             rd_substeps: 8,
+            rd_emit_radius: 0.02,
+            rd_emit_rate: 0.35,
             rd_reset: false,
             paused: false,
             time: 0.0,

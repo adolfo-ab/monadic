@@ -425,6 +425,17 @@ pub fn draw(ctx: &egui::Context, sim: &mut SimState) {
                                     .integer()
                                     .text("substeps"),
                             );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.rd_emit_radius, 0.002..=0.1)
+                                    .text("emit radius")
+                                    .logarithmic(true),
+                            );
+                            slider(
+                                ui,
+                                egui::Slider::new(&mut sim.rd_emit_rate, 0.0..=2.0)
+                                    .text("emit rate"),
+                            );
                             if ui.button("↻  reseed").clicked() {
                                 sim.rd_reset = true;
                             }

@@ -319,6 +319,10 @@ impl WaveRenderer {
         &self.sim_view
     }
 
+    pub fn emitter_buffer(&self) -> &wgpu::Buffer {
+        &self.emitter_buffer
+    }
+
     /// Rebuild the blit bind group so it samples an external texture view
     /// (e.g. the FFT display output) instead of the sim texture.
     pub fn set_blit_source(&mut self, device: &wgpu::Device, view: &wgpu::TextureView) {

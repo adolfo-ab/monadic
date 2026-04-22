@@ -3,9 +3,9 @@
 
 struct Params {
     n: u32,
-    reset: u32,
-    _pad0: u32,
-    _pad1: u32,
+    num_emitters: u32,
+    emit_radius: f32,
+    emit_rate: f32,
     feed: f32,
     kill: f32,
     coupling: f32,
@@ -20,6 +20,23 @@ struct Params {
 @group(0) @binding(1) var src: texture_2d<f32>;
 @group(0) @binding(2) var dst: texture_storage_2d<rgba32float, write>;
 @group(0) @binding(3) var sim_tex: texture_2d<f32>;
+// Emitter entries: [x, y, base_k, phase_seed] with x,y in [0,1].
+@group(0) @binding(4) var<storage, read> emitters: array<vec4<f32>>;
+
+// Closest-emitter contribution, as a smooth Gaussian kernel. Returns `density`
+// in [0, 1] summed over a small neighborhood.
+fn emitter_density(uv: vec2<f32>) -> f32 {
+    let r = max(u.emit_radius, 1e-4);
+    let inv_r2 = 1.0 / (r * r);
+    var acc: f32 = 0.0;
+    let count = u.num_emitters;
+    for (var i: u32 = 0u; i < count; i = i + 1u) {
+        let e = emitters[i].xy;
+        let d = uv - e;
+        acc = acc + exp(-dot(d, d) * inv_r2);
+    }
+    return clamp(acc, 0.0, 1.0);
+}
 
 fn lap5(p: vec2<i32>, N: i32) -> vec2<f32> {
     let xm = (p.x + N - 1) % N;
@@ -73,6 +90,14 @@ fn cs_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     newV = newV + inject;
     newU = newU - 0.5 * inject;
 
+    // Continuous emitter source: each emitter pumps V (and drains U) at its
+    // location so lattice nodes act as reaction seeds, not just wave sources.
+    let uv_norm = (vec2<f32>(gid.xy) + vec2<f32>(0.5)) / f32(u.n);
+    let emit = emitter_density(uv_norm);
+    let src_v = u.dt * u.emit_rate * emit;
+    newV = newV + src_v;
+    newU = newU - 0.5 * src_v;
+
     newU = clamp(newU, 0.0, 1.0);
     newV = clamp(newV, 0.0, 1.0);
 
@@ -84,12 +109,19 @@ fn cs_init(@builtin(global_invocation_id) gid: vec3<u32>) {
     let N = i32(u.n);
     if (i32(gid.x) >= N || i32(gid.y) >= N) { return; }
     let p = vec2<i32>(i32(gid.x), i32(gid.y));
-    let center = vec2<f32>(f32(u.n) * 0.5);
-    let d = length(vec2<f32>(gid.xy) - center);
-    let sigma = f32(u.n) * 0.12;
-    let blob = exp(-d * d / (sigma * sigma));
+    let uv_norm = (vec2<f32>(gid.xy) + vec2<f32>(0.5)) / f32(u.n);
+    // Seed V at each emitter (wider than the step-time source, for fast startup).
+    let r = max(u.emit_radius * 1.5, 1e-4);
+    let inv_r2 = 1.0 / (r * r);
+    var blob: f32 = 0.0;
+    let count = u.num_emitters;
+    for (var i: u32 = 0u; i < count; i = i + 1u) {
+        let e = emitters[i].xy;
+        let d = uv_norm - e;
+        blob = blob + exp(-dot(d, d) * inv_r2);
+    }
     let noise = hash21(vec2<u32>(gid.x + u32(u.time * 1000.0), gid.y + 73u));
-    let V = 0.4 * blob + 0.05 * noise;
+    let V = clamp(0.5 * blob + 0.03 * noise, 0.0, 1.0);
     let U = 1.0 - V;
     textureStore(dst, p, vec4<f32>(U, V, 0.0, 1.0));
 }

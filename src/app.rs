@@ -116,7 +116,7 @@ impl ApplicationHandler for App {
         let mut fft = FftRenderer::new(&device, &queue);
         fft.update_sim_view(&device, renderer.sim_view());
         let mut rd = RdRenderer::new(&device, &queue);
-        rd.update_sim_view(&device, renderer.sim_view());
+        rd.update_bindings(&device, renderer.sim_view(), renderer.emitter_buffer());
 
         let egui_ctx = egui::Context::default();
         ui::install_fonts(&egui_ctx);
@@ -233,7 +233,11 @@ impl App {
             .ensure_sim_size(&state.device, self.sim.sim_resolution);
         if sim_resized {
             state.fft.update_sim_view(&state.device, state.renderer.sim_view());
-            state.rd.update_sim_view(&state.device, state.renderer.sim_view());
+            state.rd.update_bindings(
+                &state.device,
+                state.renderer.sim_view(),
+                state.renderer.emitter_buffer(),
+            );
             // Rebind whichever source is currently active to the new view.
             match state.blit_mode {
                 BlitSource::Sim => state.renderer.restore_blit_source(&state.device),
@@ -390,9 +394,9 @@ impl App {
             }
             let params = rd::Params {
                 n: rd::RD_N,
-                reset: 0,
-                _pad0: 0,
-                _pad1: 0,
+                num_emitters: self.sim.num_nodes as u32,
+                emit_radius: self.sim.rd_emit_radius,
+                emit_rate: self.sim.rd_emit_rate,
                 feed: self.sim.rd_feed,
                 kill: self.sim.rd_kill,
                 coupling: self.sim.rd_coupling,
@@ -403,7 +407,8 @@ impl App {
                 _pad2: 0.0,
             };
             state.rd.update_params(&state.queue, &params);
-            state.rd.run(&mut encoder, self.sim.rd_substeps);
+            let substeps = if self.sim.paused { 0 } else { self.sim.rd_substeps };
+            state.rd.run(&mut encoder, substeps);
             state.rd.draw_display(&mut encoder);
         }
 

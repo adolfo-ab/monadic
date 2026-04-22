@@ -15,9 +15,9 @@ const DISPLAY_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 #[derive(Copy, Clone, Pod, Zeroable)]
 pub struct Params {
     pub n: u32,
-    pub reset: u32,
-    pub _pad0: u32,
-    pub _pad1: u32,
+    pub num_emitters: u32,
+    pub emit_radius: f32,
+    pub emit_rate: f32,
     pub feed: f32,
     pub kill: f32,
     pub coupling: f32,
@@ -50,9 +50,9 @@ pub struct RdRenderer {
     // step_ab reads A (src tex), writes B (dst storage)
     bg_step_ab: Option<wgpu::BindGroup>,
     bg_step_ba: Option<wgpu::BindGroup>,
-    // init writes into A
-    bg_init_a: wgpu::BindGroup,
-    bg_init_b: wgpu::BindGroup,
+    // init writes into A (or B) — built alongside step groups when bindings are supplied.
+    bg_init_a: Option<wgpu::BindGroup>,
+    bg_init_b: Option<wgpu::BindGroup>,
 
     display_pipeline: wgpu::RenderPipeline,
     #[allow(dead_code)]
@@ -158,6 +158,16 @@ impl RdRenderer {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -184,28 +194,8 @@ impl RdRenderer {
             cache: None,
         });
 
-        // For init we still bind step_bgl — src + sim are unused reads, so bind whatever.
-        // We'll bind view_a as src/sim placeholder.
-        let bg_init_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("rd-init-a"),
-            layout: &step_bgl,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view_b) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&view_a) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&view_b) },
-            ],
-        });
-        let bg_init_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("rd-init-b"),
-            layout: &step_bgl,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view_a) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&view_b) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&view_a) },
-            ],
-        });
+        // bg_init_a / bg_init_b / step groups are built in `update_bindings` once
+        // sim_view and emitter buffer are known.
 
         // Display side.
         let display_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -309,8 +299,8 @@ impl RdRenderer {
             params_buffer,
             bg_step_ab: None,
             bg_step_ba: None,
-            bg_init_a,
-            bg_init_b,
+            bg_init_a: None,
+            bg_init_b: None,
             display_pipeline,
             display_uniform,
             display_bg_from_a,
@@ -324,9 +314,13 @@ impl RdRenderer {
         &self.display_view
     }
 
-    /// Must be called whenever the wave sim texture is (re)created so step
-    /// bind groups point at the current view.
-    pub fn update_sim_view(&mut self, device: &wgpu::Device, sim_view: &wgpu::TextureView) {
+    /// Rebuild all compute bind groups. Call when sim_view or emitter buffer changes.
+    pub fn update_bindings(
+        &mut self,
+        device: &wgpu::Device,
+        sim_view: &wgpu::TextureView,
+        emitter_buffer: &wgpu::Buffer,
+    ) {
         self.bg_step_ab = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("rd-step-ab"),
             layout: &self.step_bgl,
@@ -335,6 +329,7 @@ impl RdRenderer {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.view_a) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&self.view_b) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(sim_view) },
+                wgpu::BindGroupEntry { binding: 4, resource: emitter_buffer.as_entire_binding() },
             ],
         }));
         self.bg_step_ba = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -345,6 +340,29 @@ impl RdRenderer {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.view_b) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&self.view_a) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(sim_view) },
+                wgpu::BindGroupEntry { binding: 4, resource: emitter_buffer.as_entire_binding() },
+            ],
+        }));
+        self.bg_init_a = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rd-init-a"),
+            layout: &self.step_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: self.params_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.view_b) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&self.view_a) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(sim_view) },
+                wgpu::BindGroupEntry { binding: 4, resource: emitter_buffer.as_entire_binding() },
+            ],
+        }));
+        self.bg_init_b = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rd-init-b"),
+            layout: &self.step_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: self.params_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.view_a) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&self.view_b) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(sim_view) },
+                wgpu::BindGroupEntry { binding: 4, resource: emitter_buffer.as_entire_binding() },
             ],
         }));
     }
@@ -358,8 +376,12 @@ impl RdRenderer {
     }
 
     pub fn run(&mut self, encoder: &mut wgpu::CommandEncoder, substeps: u32) {
-        let (Some(bg_ab), Some(bg_ba)) = (self.bg_step_ab.as_ref(), self.bg_step_ba.as_ref())
-        else {
+        let (Some(bg_ab), Some(bg_ba), Some(bg_ia), Some(bg_ib)) = (
+            self.bg_step_ab.as_ref(),
+            self.bg_step_ba.as_ref(),
+            self.bg_init_a.as_ref(),
+            self.bg_init_b.as_ref(),
+        ) else {
             return;
         };
         let groups = (RD_N + 7) / 8;
@@ -371,10 +393,10 @@ impl RdRenderer {
 
         if !self.initialized {
             cpass.set_pipeline(&self.init_pipeline);
-            cpass.set_bind_group(0, &self.bg_init_a, &[]);
+            cpass.set_bind_group(0, bg_ia, &[]);
             cpass.dispatch_workgroups(groups, groups, 1);
             // Also seed B so first B→A read is valid.
-            cpass.set_bind_group(0, &self.bg_init_b, &[]);
+            cpass.set_bind_group(0, bg_ib, &[]);
             cpass.dispatch_workgroups(groups, groups, 1);
             self.initialized = true;
             self.front_is_a = true;
